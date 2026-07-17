@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tone — Settings</title>
+  <link rel="stylesheet" href="/static/tone.css">
+</head>
+<body>
+<main>
+  <h1><span class="logo">Tone</span> engine</h1>
+  <p class="sub">Status &amp; pairing. All local, all yours.</p>
+
+  <div id="no-token" class="card hidden">
+    <p class="error">Open this page via the link printed in the engine's terminal
+    (it ends with <code>#&lt;token&gt;</code>).</p>
+  </div>
+
+  <section class="card">
+    <h2>Status</h2>
+    <div id="health"><span class="status-dot dot-warn"></span>Checking…</div>
+    <p class="hint" id="health-detail"></p>
+  </section>
+
+  <section class="card">
+    <h2>Pairing token</h2>
+    <p class="hint">Paste into the Tone browser extension's options page.</p>
+    <code class="token" id="pairing-token">—</code>
+  </section>
+
+  <section class="card">
+    <h2>Model</h2>
+    <p id="model-info" class="hint">—</p>
+    <a id="rerun-setup" href="/setup"><button class="ghost">Re-run setup / change model</button></a>
+  </section>
+
+  <footer>Tone engine · local only</footer>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Tone test page</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
+    textarea, input[type=text], [contenteditable] {
+      width: 100%; font: inherit; padding: 10px; margin: 8px 0 24px;
+      border: 1px solid #bbb; border-radius: 8px; box-sizing: border-box;
+    }
+    [contenteditable] { min-height: 120px; }
+    h2 { font-size: 15px; margin-bottom: 0; }
+  </style>
+</head>
+<body>
+  <h1>Tone test page</h1>
+  <p>Load the extension, pair it, focus a field, and paste flawed text such as:</p>
+  <p><em>I will definately be there tomorow. In order to succeed, we should of tried harder. Their going to review the the report.</em></p>
+
+  <h2>&lt;textarea&gt;</h2>
+  <textarea rows="5" placeholder="Type here…"></textarea>
+
+  <h2>&lt;input type="text"&gt;</h2>
+  <input type="text" placeholder="Single line…">
+
+  <h2>contenteditable</h2>
+  <div contenteditable="true"><p>Edit me…</p></div>
+</body>
+</html>

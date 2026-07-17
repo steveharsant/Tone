@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tone — Options</title>
+  <link rel="stylesheet" href="./options.css">
+</head>
+<body>
+<main>
+  <h1><span class="logo">Tone</span> extension</h1>
+  <p class="sub">Pair with the local engine. Nothing here ever leaves your machine.</p>
+
+  <section class="card">
+    <h2>Engine connection</h2>
+    <label>Port
+      <input id="port" type="number" min="1" max="65535" placeholder="8765">
+    </label>
+    <label>Pairing token
+      <input id="token" type="password" autocomplete="off" spellcheck="false"
+             placeholder="paste from the engine's settings page">
+    </label>
+    <div class="row">
+      <span id="status" class="hint"></span>
+      <span>
+        <button id="test" class="ghost">Test connection</button>
+        <button id="save">Save</button>
+      </span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Disabled sites</h2>
+    <p class="hint">One hostname per line (e.g. <code>docs.google.com</code>).</p>
+    <textarea id="disabled" rows="5" spellcheck="false"></textarea>
+  </section>
+</main>
+<script type="module" src="./main.ts"></script>
+</body>
+</html>

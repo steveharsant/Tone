@@ -1,0 +1,11 @@
+# Go
+engine/tone
+*.test
+
+# Node / WXT
+extension/node_modules/
+extension/.output/
+extension/.wxt/
+
+# Local scratch
+*.log

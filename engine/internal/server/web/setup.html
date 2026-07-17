@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tone — Setup</title>
+  <link rel="stylesheet" href="/static/tone.css">
+</head>
+<body>
+<main>
+  <h1><span class="logo">Tone</span> setup</h1>
+  <p class="sub">Local AI writing assistant. Everything below stays on this machine.</p>
+
+  <div id="no-token" class="card hidden">
+    <p class="error">This page needs the setup link printed in the terminal where the
+    engine is running (it ends with <code>#&lt;token&gt;</code>). Open that exact URL.</p>
+  </div>
+
+  <section id="step-ollama" class="card">
+    <h2>1 · Local AI runtime (Ollama)</h2>
+    <div class="row">
+      <span id="ollama-status"><span class="status-dot dot-warn"></span>Checking…</span>
+      <button id="ollama-install" class="hidden">Install locally</button>
+    </div>
+    <p class="hint">Installed rootlessly into your home directory — no admin rights,
+    nothing outside Tone's own folder. About 1–2&nbsp;GB.</p>
+    <div id="ollama-progress" class="hidden">
+      <progress id="ollama-bar" max="100" value="0"></progress>
+      <p class="hint" id="ollama-progress-text"></p>
+    </div>
+    <p class="error hidden" id="ollama-error"></p>
+  </section>
+
+  <section id="step-model" class="card">
+    <h2>2 · Choose a model</h2>
+    <p class="hint">Curated for grammar and style checking — small enough to feel
+    instant, capable enough to be worth trusting.</p>
+    <div id="models"></div>
+    <div id="pull-progress" class="hidden">
+      <progress id="pull-bar" max="100" value="0"></progress>
+      <p class="hint" id="pull-progress-text"></p>
+    </div>
+    <p class="error hidden" id="pull-error"></p>
+    <div class="row" style="margin-top:12px">
+      <span class="hint" id="model-hint"></span>
+      <button id="model-continue" disabled>Download &amp; continue</button>
+    </div>
+  </section>
+
+  <section id="step-done" class="card hidden">
+    <h2>3 · Pair the browser extension</h2>
+    <p>Setup complete. Paste this pairing token into the Tone extension's options page:</p>
+    <code class="token" id="pairing-token"></code>
+    <p class="hint">The token only works from this machine (the engine never listens
+    outside <code>127.0.0.1</code>).</p>
+    <div class="row"><span></span><a href="/" id="to-settings"><button class="ghost">Open settings</button></a></div>
+  </section>
+
+  <footer>Tone engine · local only · <a href="/" id="footer-settings">settings</a></footer>
+</main>
+<script src="/static/setup.js"></script>
+</body>
+</html>
