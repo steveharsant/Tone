@@ -4,7 +4,6 @@ import (
 	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
-	"strings"
 	"sync"
 )
 
@@ -28,11 +27,11 @@ func NewCache(capacity int) *Cache {
 	return &Cache{cap: capacity, ll: list.New(), m: make(map[string]*list.Element)}
 }
 
-func CacheKey(model string, categories []string, segText string) string {
+func CacheKey(model, optsKey, segText string) string {
 	h := sha256.New()
 	h.Write([]byte(model))
 	h.Write([]byte{0})
-	h.Write([]byte(strings.Join(categories, ",")))
+	h.Write([]byte(optsKey))
 	h.Write([]byte{0})
 	h.Write([]byte(segText))
 	return hex.EncodeToString(h.Sum(nil))

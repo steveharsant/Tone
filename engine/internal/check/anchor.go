@@ -64,8 +64,8 @@ func anchorAll(segText string, raws []RawSuggestion) []anchored {
 	return out
 }
 
-// findUnclaimed returns the first exact occurrence of needle in hay that does
-// not overlap an already-claimed range.
+// findUnclaimed returns the first exact occurrence of needle in hay that
+// sits on word boundaries and does not overlap an already-claimed range.
 func findUnclaimed(hay, needle string, overlaps func(s, e int) bool) (int, int, bool) {
 	from := 0
 	for {
@@ -75,11 +75,37 @@ func findUnclaimed(hay, needle string, overlaps func(s, e int) bool) (int, int, 
 		}
 		s := from + i
 		e := s + len(needle)
-		if !overlaps(s, e) {
+		if !overlaps(s, e) && onWordBoundaries(hay, s, e) {
 			return s, e, true
 		}
 		from = s + 1
 	}
+}
+
+// onWordBoundaries rejects matches that start or end mid-word — e.g. the
+// model suggesting "can"→"cannot" against the text "can't" would otherwise
+// anchor inside the contraction and corrupt it on accept. Apostrophes count
+// as word-internal so contractions are treated as single words.
+func onWordBoundaries(hay string, s, e int) bool {
+	if s > 0 {
+		first, _ := utf8.DecodeRuneInString(hay[s:])
+		prev, _ := utf8.DecodeLastRuneInString(hay[:s])
+		if isWordRune(first) && isWordRune(prev) {
+			return false
+		}
+	}
+	if e < len(hay) {
+		last, _ := utf8.DecodeLastRuneInString(hay[:e])
+		next, _ := utf8.DecodeRuneInString(hay[e:])
+		if isWordRune(last) && isWordRune(next) {
+			return false
+		}
+	}
+	return true
+}
+
+func isWordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '\'' || r == '’'
 }
 
 // fuzzyFind scans hay for needle with two relaxations: ASCII letters compare
@@ -93,7 +119,7 @@ func fuzzyFind(hay, needle string, overlaps func(s, e int) bool) (int, int, bool
 		if !utf8.RuneStart(hay[start]) {
 			continue
 		}
-		if end, ok := fuzzyMatchAt(hay, needle, start); ok && !overlaps(start, end) {
+		if end, ok := fuzzyMatchAt(hay, needle, start); ok && !overlaps(start, end) && onWordBoundaries(hay, start, end) {
 			return start, end, true
 		}
 	}

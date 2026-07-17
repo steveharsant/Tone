@@ -37,7 +37,7 @@ func TestCheckerEndToEnd(t *testing.T) {
 	c := New(fake, "test-model", NewCache(16))
 
 	text := "I will definately come. We met in order to talk."
-	sugs, stats, err := c.Check(context.Background(), text, []string{"correctness", "clarity"})
+	sugs, stats, err := c.Check(context.Background(), text, Options{Spelling: true, Grammar: true, Clarity: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestCheckerEndToEnd(t *testing.T) {
 
 	// Second pass: everything unchanged → all from cache, no provider calls.
 	before := fake.calls.Load()
-	_, stats2, err := c.Check(context.Background(), text, []string{"correctness", "clarity"})
+	_, stats2, err := c.Check(context.Background(), text, Options{Spelling: true, Grammar: true, Clarity: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestCheckerFiltersDisabledCategories(t *testing.T) {
 		"quick": `{"suggestions":[{"original":"quick","replacement":"rapid","category":"engagement","rule":"word-choice","explanation":"Stronger."}]}`,
 	}}
 	c := New(fake, "m", NewCache(16))
-	sugs, _, err := c.Check(context.Background(), "The quick fix.", []string{"correctness", "clarity"})
+	sugs, _, err := c.Check(context.Background(), "The quick fix.", Options{Spelling: true, Grammar: true, Clarity: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestCheckerUnicodeSpans(t *testing.T) {
 	}}
 	c := New(fake, "m", NewCache(16))
 	text := "😀😀 I saw tehm yesterday."
-	sugs, _, err := c.Check(context.Background(), text, []string{"correctness"})
+	sugs, _, err := c.Check(context.Background(), text, Options{Spelling: true, Grammar: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,5 +138,39 @@ func TestCacheEviction(t *testing.T) {
 	}
 	if _, ok := c.Get("a"); !ok {
 		t.Error("'a' should survive eviction")
+	}
+}
+
+func TestCheckerDisabledRules(t *testing.T) {
+	fake := &fakeProvider{responses: map[string]string{
+		"in order to": `{"suggestions":[{"original":"in order to","replacement":"to","category":"clarity","rule":"Wordiness","explanation":"Wordy."}]}`,
+	}}
+	c := New(fake, "m", NewCache(16))
+	sugs, _, err := c.Check(context.Background(), "We met in order to talk.",
+		Options{Clarity: true, DisabledRules: []string{"wordiness"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sugs) != 0 {
+		t.Fatalf("disabled rule leaked through: %+v", sugs)
+	}
+}
+
+func TestStyleRulesEnableDeliveryAndReachPrompt(t *testing.T) {
+	opts := Options{Spelling: true, StyleRules: []string{"Do not use contractions"}}
+	if !opts.AllowedCategories()[CategoryDelivery] {
+		t.Fatal("style rules must enable the delivery category")
+	}
+	msgs := buildMessages("Don't worry.", opts)
+	if !strings.Contains(msgs[0].Content, "Do not use contractions") {
+		t.Fatal("style rule missing from system prompt")
+	}
+}
+
+func TestOptionsKeyChangesInvalidateCache(t *testing.T) {
+	a := Options{Spelling: true}
+	b := Options{Spelling: true, ToneTarget: "formal"}
+	if a.key() == b.key() {
+		t.Fatal("differing options must produce differing cache keys")
 	}
 }

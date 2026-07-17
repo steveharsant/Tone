@@ -9,21 +9,35 @@
 <body>
 <main>
   <h1><span class="logo">Tone</span> extension</h1>
-  <p class="sub">Pair with the local engine. Nothing here ever leaves your machine.</p>
+  <p class="sub">Pair with the engine. With a local engine, nothing ever leaves your machine.</p>
 
   <section class="card">
     <h2>Engine connection</h2>
-    <label>Port
-      <input id="port" type="number" min="1" max="65535" placeholder="8765">
-    </label>
+    <div class="grid">
+      <label>Scheme
+        <select id="scheme">
+          <option value="http">http</option>
+          <option value="https">https</option>
+        </select>
+      </label>
+      <label>Host
+        <input id="host" type="text" placeholder="127.0.0.1" spellcheck="false">
+      </label>
+      <label>Port
+        <input id="port" type="number" min="1" max="65535" placeholder="8765">
+      </label>
+    </div>
+    <p class="hint" id="remote-hint" hidden>Remote engine: traffic leaves this machine.
+    Prefer a VPN/tunnel (Tailscale, SSH) or HTTPS via a reverse proxy.</p>
     <label>Pairing token
       <input id="token" type="password" autocomplete="off" spellcheck="false"
-             placeholder="paste from the engine's settings page">
+             placeholder="paste from the engine, or use auto-connect">
     </label>
     <div class="row">
       <span id="status" class="hint"></span>
       <span>
-        <button id="test" class="ghost">Test connection</button>
+        <button id="autoconnect" class="ghost">Connect automatically</button>
+        <button id="test" class="ghost">Test</button>
         <button id="save">Save</button>
       </span>
     </div>
@@ -34,6 +48,9 @@
     <p class="hint">One hostname per line (e.g. <code>docs.google.com</code>).</p>
     <textarea id="disabled" rows="5" spellcheck="false"></textarea>
   </section>
+
+  <p class="hint">Checks, tone of voice, and style rules live in the engine's own
+  settings page (tray icon → Open settings).</p>
 </main>
 <script type="module" src="./main.ts"></script>
 </body>

@@ -94,3 +94,38 @@ func TestAnchorDropsWhenTextAlreadyEqualsReplacement(t *testing.T) {
 		t.Fatalf("self-identical anchored edit must be dropped, got %+v", got)
 	}
 }
+
+func TestAnchorRejectsMidWordMatch(t *testing.T) {
+	// Model says replace "can" with "cannot", but the text has "can't" —
+	// anchoring inside the contraction would corrupt it on accept.
+	got := anchorAll("We can't make it.", []RawSuggestion{
+		{Original: "can", Replacement: "cannot", Category: "correctness"},
+	})
+	if len(got) != 0 {
+		t.Fatalf("mid-word anchor must be rejected, got %+v", got)
+	}
+}
+
+func TestAnchorAcceptsPunctuationAdjacent(t *testing.T) {
+	seg := "It was definately."
+	got := anchorAll(seg, []RawSuggestion{
+		{Original: "definately", Replacement: "definitely", Category: "correctness"},
+	})
+	if len(got) != 1 {
+		t.Fatal("word followed by punctuation must still anchor")
+	}
+}
+
+func TestAnchorPrefersBoundaryOccurrence(t *testing.T) {
+	// "art" appears mid-word in "start" before it appears standalone.
+	seg := "We start the art class."
+	got := anchorAll(seg, []RawSuggestion{
+		{Original: "art", Replacement: "arts", Category: "correctness"},
+	})
+	if len(got) != 1 {
+		t.Fatal("boundary occurrence should anchor")
+	}
+	if s := got[0]; seg[s.byteStart-1] != ' ' || seg[s.byteStart:s.byteEnd] != "art" {
+		t.Fatalf("anchored wrong occurrence at %d", s.byteStart)
+	}
+}

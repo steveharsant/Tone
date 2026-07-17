@@ -42,6 +42,8 @@ export class FieldSession {
   private suggestions: Suggestion[] = [];
   private dismissed = new Set<string>();
   private lastCheckedText = '';
+  /** The text the current suggestion spans refer to (kept in sync on edits). */
+  private renderedText = '';
   private debounceTimer: number | undefined;
   private ceRendered: CERendered[] = [];
   private formRendered: FormRendered[] = [];
@@ -92,9 +94,30 @@ export class FieldSession {
   // --- checking ----------------------------------------------------------
 
   private handleInput = (): void => {
-    // Typing invalidates offsets; hide rather than mislead. The engine's
-    // sentence cache makes the re-check cheap for unchanged sentences.
-    this.clearRender();
+    // Keep underlines alive through edits: compute the single contiguous
+    // edit (common prefix/suffix diff), shift every span after it, and drop
+    // only suggestions the edit actually touched. The debounced re-check
+    // then replaces everything quietly — no flicker on untouched text.
+    const newText = this.getText();
+    const edit = diffEdit(this.renderedText, newText);
+    if (edit) {
+      const delta = edit.newEnd - edit.oldEnd;
+      this.suggestions = this.suggestions.filter((s) => {
+        if (s.span.end <= edit.start) return true; // before the edit
+        if (s.span.start >= edit.oldEnd) {
+          s.span = { start: s.span.start + delta, end: s.span.end + delta };
+          return true;
+        }
+        return false; // overlaps the edit
+      });
+      // Safety: a multi-caret or IME edit can defeat the single-edit model;
+      // anything whose text no longer matches gets dropped, never misdrawn.
+      this.suggestions = this.suggestions.filter(
+        (s) => newText.slice(s.span.start, s.span.end) === s.original,
+      );
+      this.renderedText = newText;
+      this.render();
+    }
     this.schedule();
   };
 
@@ -137,6 +160,7 @@ export class FieldSession {
     // Discard stale results: the user kept typing while we were checking.
     if (this.getText() !== text) return;
     this.lastCheckedText = text;
+    this.renderedText = text;
     this.suggestions = res.suggestions.filter((s) => !this.dismissed.has(keyOf(s)));
     this.render();
   }
@@ -296,4 +320,29 @@ export class FieldSession {
 /** Dismissals should survive re-checks, whose suggestions get fresh ids. */
 function keyOf(s: Suggestion): string {
   return `${s.category} ${s.original} ${s.replacement}`;
+}
+
+interface Edit {
+  start: number;
+  oldEnd: number;
+  newEnd: number;
+}
+
+/**
+ * Models the difference between two texts as one contiguous replacement
+ * (true for typing, deletion, paste, and accepted suggestions). Returns null
+ * when the texts are identical.
+ */
+export function diffEdit(oldText: string, newText: string): Edit | null {
+  if (oldText === newText) return null;
+  let p = 0;
+  const max = Math.min(oldText.length, newText.length);
+  while (p < max && oldText[p] === newText[p]) p++;
+  let oldEnd = oldText.length;
+  let newEnd = newText.length;
+  while (oldEnd > p && newEnd > p && oldText[oldEnd - 1] === newText[newEnd - 1]) {
+    oldEnd--;
+    newEnd--;
+  }
+  return { start: p, oldEnd, newEnd };
 }

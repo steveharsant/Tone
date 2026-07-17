@@ -37,7 +37,7 @@ type Stats struct {
 }
 
 // Check analyzes text and returns anchored suggestions ordered by position.
-func (c *Checker) Check(ctx context.Context, text string, categories []string) ([]Suggestion, Stats, error) {
+func (c *Checker) Check(ctx context.Context, text string, opts Options) ([]Suggestion, Stats, error) {
 	segs := Split(text)
 	stats := Stats{Segments: len(segs)}
 	if len(segs) == 0 {
@@ -56,7 +56,7 @@ func (c *Checker) Check(ctx context.Context, text string, categories []string) (
 	)
 
 	for i, seg := range segs {
-		key := CacheKey(c.model, categories, seg.Text)
+		key := CacheKey(c.model, opts.key(), seg.Text)
 		if raws, ok := c.cache.Get(key); ok {
 			rawsBySeg[i] = raws
 			stats.CacheHits++
@@ -71,7 +71,7 @@ func (c *Checker) Check(ctx context.Context, text string, categories []string) (
 			case <-ctx.Done():
 				return
 			}
-			raws, err := c.checkSegment(ctx, seg.Text, categories)
+			raws, err := c.checkSegment(ctx, seg.Text, opts)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil && ctx.Err() == nil {
@@ -91,9 +91,10 @@ func (c *Checker) Check(ctx context.Context, text string, categories []string) (
 	}
 
 	conv := NewU16Converter(text)
-	allowed := make(map[string]bool, len(categories))
-	for _, cat := range categories {
-		allowed[cat] = true
+	allowed := opts.AllowedCategories()
+	disabled := make(map[string]bool, len(opts.DisabledRules))
+	for _, r := range opts.DisabledRules {
+		disabled[normalizeRule(r)] = true
 	}
 
 	var out []Suggestion
@@ -101,6 +102,9 @@ func (c *Checker) Check(ctx context.Context, text string, categories []string) (
 		for _, a := range anchorAll(seg.Text, rawsBySeg[i]) {
 			cat := strings.ToLower(strings.TrimSpace(a.raw.Category))
 			if !allowed[cat] {
+				continue
+			}
+			if disabled[normalizeRule(a.raw.Rule)] {
 				continue
 			}
 			bs := seg.ByteStart + a.byteStart
@@ -122,10 +126,17 @@ func (c *Checker) Check(ctx context.Context, text string, categories []string) (
 	return out, stats, nil
 }
 
-func (c *Checker) checkSegment(ctx context.Context, segText string, categories []string) ([]RawSuggestion, error) {
+// normalizeRule folds case and dash/space variants so "Subject Verb
+// Agreement" blocks "subject-verb-agreement".
+func normalizeRule(r string) string {
+	r = strings.ToLower(strings.TrimSpace(r))
+	return strings.ReplaceAll(strings.ReplaceAll(r, " ", "-"), "_", "-")
+}
+
+func (c *Checker) checkSegment(ctx context.Context, segText string, opts Options) ([]RawSuggestion, error) {
 	content, err := c.prov.Complete(ctx, provider.Request{
 		Model:       c.model,
-		Messages:    buildMessages(segText, categories),
+		Messages:    buildMessages(segText, opts),
 		Temperature: 0.2,
 		MaxTokens:   2000,
 		JSONMode:    true,

@@ -31,14 +31,58 @@ type Provider struct {
 	APIKeyRef string `json:"api_key_ref,omitempty"`
 }
 
+// Checks are the user-facing toggles. Spelling and grammar both surface as
+// the "correctness" wire category; the split exists so they can be switched
+// independently.
+type Checks struct {
+	Spelling   bool `json:"spelling"`
+	Grammar    bool `json:"grammar"` // includes punctuation
+	Clarity    bool `json:"clarity"`
+	Vocabulary bool `json:"vocabulary"` // wire category "engagement"
+	Tone       bool `json:"tone"`       // wire category "delivery"
+}
+
 type Config struct {
 	Port          int      `json:"port"`
+	// ListenHost is the bind address. Anything other than loopback exposes
+	// the engine to the network — set only deliberately (see -listen).
+	ListenHost    string   `json:"listen_host,omitempty"`
 	PairingToken  string   `json:"pairing_token"`
 	SetupComplete bool     `json:"setup_complete"`
 	Provider      Provider `json:"provider"`
-	Categories    []string `json:"categories"`
+	Checks        Checks   `json:"checks"`
+	// ToneTarget is the desired voice ("", "formal", "casual", "confident",
+	// "friendly", "academic"). Empty means neutral/no target.
+	ToneTarget string `json:"tone_target,omitempty"`
+	// StyleRules are user-authored instructions injected into the checker
+	// prompt, e.g. "Do not use contractions".
+	StyleRules []string `json:"style_rules,omitempty"`
+	// DisabledRules suppresses suggestions whose rule slug matches, e.g.
+	// "wordiness". Matched case-insensitively.
+	DisabledRules []string `json:"disabled_rules,omitempty"`
+
+	// Categories is the legacy pre-Checks field, kept only for migration.
+	Categories []string `json:"categories,omitempty"`
 
 	path string
+}
+
+// EnabledCategories derives the wire categories from the check toggles.
+func (c *Config) EnabledCategories() []string {
+	var cats []string
+	if c.Checks.Spelling || c.Checks.Grammar {
+		cats = append(cats, "correctness")
+	}
+	if c.Checks.Clarity {
+		cats = append(cats, "clarity")
+	}
+	if c.Checks.Vocabulary {
+		cats = append(cats, "engagement")
+	}
+	if c.Checks.Tone {
+		cats = append(cats, "delivery")
+	}
+	return cats
 }
 
 func defaultConfig(path string) *Config {
@@ -49,8 +93,8 @@ func defaultConfig(path string) *Config {
 			Type:    ProviderOllama,
 			BaseURL: "http://127.0.0.1:11434",
 		},
-		Categories: []string{"correctness", "clarity"},
-		path:       path,
+		Checks: Checks{Spelling: true, Grammar: true, Clarity: true},
+		path:   path,
 	}
 }
 
@@ -104,6 +148,23 @@ func Load(path string) (*Config, error) {
 	}
 	if c.Port == 0 {
 		c.Port = DefaultPort
+	}
+	// Migrate pre-Checks configs: derive toggles from the legacy category
+	// list, defaulting to the original correctness+clarity behavior.
+	if c.Checks == (Checks{}) {
+		c.Checks = Checks{Spelling: true, Grammar: true, Clarity: true}
+		for _, cat := range c.Categories {
+			switch cat {
+			case "engagement":
+				c.Checks.Vocabulary = true
+			case "delivery":
+				c.Checks.Tone = true
+			}
+		}
+		c.Categories = nil
+		if err := c.Save(); err != nil {
+			return nil, err
+		}
 	}
 	if c.PairingToken == "" {
 		c.PairingToken = newToken()

@@ -19,6 +19,7 @@ import (
 	"github.com/steveharsant/tone/engine/internal/check"
 	"github.com/steveharsant/tone/engine/internal/config"
 	"github.com/steveharsant/tone/engine/internal/ollama"
+	"github.com/steveharsant/tone/engine/internal/pairing"
 	"github.com/steveharsant/tone/engine/internal/provider"
 )
 
@@ -28,19 +29,32 @@ var webFS embed.FS
 type Server struct {
 	Version string
 
-	mu    sync.RWMutex
-	cfg   *config.Config
-	mgr   *ollama.Manager
-	cache *check.Cache
+	mu       sync.RWMutex
+	cfg      *config.Config
+	mgr      *ollama.Manager
+	cache    *check.Cache
+	pairings *pairing.Store
 }
 
 func New(version string, cfg *config.Config, mgr *ollama.Manager) *Server {
 	return &Server{
-		Version: version,
-		cfg:     cfg,
-		mgr:     mgr,
-		cache:   check.NewCache(4096),
+		Version:  version,
+		cfg:      cfg,
+		mgr:      mgr,
+		cache:    check.NewCache(4096),
+		pairings: pairing.NewStore(),
 	}
+}
+
+// Pairings exposes the pairing store to the tray UI, which shares the
+// process and approves requests directly.
+func (s *Server) Pairings() *pairing.Store { return s.pairings }
+
+// SettingsURL is the tokened settings-page URL (tray + startup banner).
+func (s *Server) SettingsURL() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return fmt.Sprintf("http://127.0.0.1:%d/#%s", s.cfg.Port, s.cfg.PairingToken)
 }
 
 // checker builds a Checker for the current provider config. The cache is
@@ -77,6 +91,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/setup/ollama/install", s.auth(s.handleOllamaInstall))
 	mux.HandleFunc("POST /api/setup/pull", s.auth(s.handlePull))
 	mux.HandleFunc("POST /api/setup/complete", s.auth(s.handleSetupComplete))
+	mux.HandleFunc("GET /api/settings", s.auth(s.handleGetSettings))
+	mux.HandleFunc("POST /api/settings", s.auth(s.handleSaveSettings))
+
+	// Pairing: request/poll are unauthenticated by design (the extension has
+	// no token yet); a human approval gates the token handover.
+	mux.HandleFunc("POST /api/pair/request", s.handlePairRequest)
+	mux.HandleFunc("GET /api/pair/poll", s.handlePairPoll)
+	mux.HandleFunc("GET /api/pair/pending", s.auth(s.handlePairPending))
+	mux.HandleFunc("POST /api/pair/decide", s.auth(s.handlePairDecide))
 
 	// Embedded UI (no secrets in the static assets themselves).
 	sub, err := fs.Sub(webFS, "web")
@@ -107,19 +130,36 @@ func serveEmbedded(w http.ResponseWriter, r *http.Request, sub fs.FS, name strin
 
 // hostCheck rejects requests whose Host header is not a loopback name,
 // closing the DNS-rebinding hole (attacker.com resolving to 127.0.0.1).
+// In remote mode (explicit non-loopback listen_host) the check is relaxed —
+// clients will address the engine by hostname/IP — and the token remains
+// the actual gate on every sensitive route.
 func (s *Server) hostCheck(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		remote := s.cfg.ListenHost != "" && !isLoopback(s.cfg.ListenHost)
+		s.mu.RUnlock()
+		if remote {
+			next.ServeHTTP(w, r)
+			return
+		}
 		host := r.Host
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h
 		}
-		switch host {
-		case "127.0.0.1", "localhost", "[::1]", "::1":
+		if isLoopback(host) {
 			next.ServeHTTP(w, r)
-		default:
-			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
 		}
+		http.Error(w, "forbidden host", http.StatusForbidden)
 	})
+}
+
+func isLoopback(host string) bool {
+	switch host {
+	case "127.0.0.1", "localhost", "[::1]", "::1":
+		return true
+	}
+	return false
 }
 
 // auth enforces the pairing token: Authorization: Bearer <token> (extension)
@@ -145,11 +185,20 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ListenAndServe binds to loopback only and serves until ctx is cancelled.
+// ListenAndServe binds to loopback (or the explicitly configured
+// listen_host) and serves until ctx is cancelled.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	s.mu.RLock()
-	addr := fmt.Sprintf("127.0.0.1:%d", s.cfg.Port)
+	host := s.cfg.ListenHost
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	addr := net.JoinHostPort(host, fmt.Sprintf("%d", s.cfg.Port))
 	s.mu.RUnlock()
+
+	if !isLoopback(host) {
+		log.Printf("WARNING: engine exposed on %s — all requests still require the pairing token, but traffic is plain HTTP; only do this on a trusted network (or tunnel via SSH/Tailscale/reverse proxy with TLS)", addr)
+	}
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {

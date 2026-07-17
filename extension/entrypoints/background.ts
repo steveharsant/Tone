@@ -7,7 +7,7 @@
 
 import { defineBackground } from '#imports';
 import { browser } from 'wxt/browser';
-import { DEFAULT_SETTINGS, type CheckResult, type HealthResult, type SiteStatus, type Suggestion, type ToneSettings } from '@/lib/types';
+import { DEFAULT_SETTINGS, type CheckResult, type HealthResult, type PairResult, type SiteStatus, type Suggestion, type ToneSettings } from '@/lib/types';
 
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener((msg: unknown, sender) => {
@@ -19,6 +19,8 @@ export default defineBackground(() => {
         return health();
       case 'tone:siteStatus':
         return siteStatus(sender.url ?? sender.tab?.url);
+      case 'tone:pair':
+        return pair();
     }
   });
 });
@@ -29,7 +31,51 @@ async function getSettings(): Promise<ToneSettings> {
 }
 
 function engineURL(settings: ToneSettings, path: string): string {
-  return `http://127.0.0.1:${settings.port}${path}`;
+  return `${settings.scheme}://${settings.host}:${settings.port}${path}`;
+}
+
+/**
+ * Auto-connect: file a pairing request with the engine, then poll until the
+ * user approves it from the engine's settings page or tray menu. The token
+ * arrives on the approved poll and is stored immediately.
+ */
+async function pair(): Promise<PairResult> {
+  const settings = await getSettings();
+  let id: string;
+  try {
+    const resp = await fetch(engineURL(settings, '/api/pair/request'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client: 'Tone browser extension' }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (resp.status === 429) return { ok: false, error: 'too_many' };
+    if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
+    id = ((await resp.json()) as { id: string }).id;
+  } catch {
+    return { ok: false, error: 'engine_unreachable' };
+  }
+
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1_500));
+    try {
+      const resp = await fetch(engineURL(settings, `/api/pair/poll?id=${id}`), {
+        signal: AbortSignal.timeout(5_000),
+      });
+      const data = (await resp.json()) as { status: string; token?: string; port?: number };
+      if (data.status === 'approved' && data.token) {
+        await browser.storage.local.set({ token: data.token, port: data.port ?? settings.port });
+        await setBadge('');
+        return { ok: true };
+      }
+      if (data.status === 'denied') return { ok: false, error: 'denied' };
+      if (data.status === 'unknown') return { ok: false, error: 'timeout' };
+    } catch {
+      /* engine mid-restart; keep polling until the deadline */
+    }
+  }
+  return { ok: false, error: 'timeout' };
 }
 
 async function checkText(text: string): Promise<CheckResult> {

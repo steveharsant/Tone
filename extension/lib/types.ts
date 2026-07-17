@@ -48,13 +48,22 @@ export interface SiteStatus {
 }
 
 export interface ToneSettings {
+  /** Engine host — 127.0.0.1 unless running the engine on a remote machine. */
+  host: string;
+  scheme: 'http' | 'https';
   port: number;
   token: string;
   disabledSites: string[];
 }
 
 export const DEFAULT_SETTINGS: ToneSettings = {
+  host: '127.0.0.1',
+  scheme: 'http',
   port: 8765,
   token: '',
   disabledSites: [],
 };
+
+export type PairResult =
+  | { ok: true }
+  | { ok: false; error: 'denied' | 'timeout' | 'engine_unreachable' | 'too_many' | string };

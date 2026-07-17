@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/steveharsant/tone/engine/internal/catalog"
 	"github.com/steveharsant/tone/engine/internal/check"
+	"github.com/steveharsant/tone/engine/internal/config"
 	"github.com/steveharsant/tone/engine/internal/ollama"
+	"github.com/steveharsant/tone/engine/internal/pairing"
 )
 
 const maxCheckBytes = 256 << 10
@@ -45,22 +48,42 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, checkResponse{Suggestions: []check.Suggestion{}})
 		return
 	}
-	cats := req.Categories
-	if len(cats) == 0 {
-		s.mu.RLock()
-		cats = append(cats, s.cfg.Categories...)
-		s.mu.RUnlock()
+	s.mu.RLock()
+	opts := check.Options{
+		Spelling:      s.cfg.Checks.Spelling,
+		Grammar:       s.cfg.Checks.Grammar,
+		Clarity:       s.cfg.Checks.Clarity,
+		Vocabulary:    s.cfg.Checks.Vocabulary,
+		Tone:          s.cfg.Checks.Tone,
+		ToneTarget:    s.cfg.ToneTarget,
+		StyleRules:    append([]string(nil), s.cfg.StyleRules...),
+		DisabledRules: append([]string(nil), s.cfg.DisabledRules...),
 	}
+	s.mu.RUnlock()
 
 	chk, err := s.checker()
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	sugs, stats, err := chk.Check(r.Context(), req.Text, cats)
+	sugs, stats, err := chk.Check(r.Context(), req.Text, opts)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "provider error: "+err.Error())
 		return
+	}
+	// Optional per-request narrowing (kept for API compatibility).
+	if len(req.Categories) > 0 {
+		want := make(map[string]bool, len(req.Categories))
+		for _, c := range req.Categories {
+			want[c] = true
+		}
+		filtered := sugs[:0]
+		for _, sg := range sugs {
+			if want[sg.Category] {
+				filtered = append(filtered, sg)
+			}
+		}
+		sugs = filtered
 	}
 	if sugs == nil {
 		sugs = []check.Suggestion{}
@@ -116,8 +139,136 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 		"curated":          catalog.Curated,
 		"provider":         s.cfg.Provider,
 		"setup_complete":   s.cfg.SetupComplete,
-		"categories":       s.cfg.Categories,
 	})
+}
+
+// --- settings API ------------------------------------------------------
+
+type settingsPayload struct {
+	Checks        config.Checks `json:"checks"`
+	ToneTarget    string        `json:"tone_target"`
+	StyleRules    []string      `json:"style_rules"`
+	DisabledRules []string      `json:"disabled_rules"`
+	Model         string        `json:"model,omitempty"`
+}
+
+var validToneTargets = map[string]bool{
+	"": true, "formal": true, "casual": true, "confident": true,
+	"friendly": true, "academic": true,
+}
+
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"checks":         s.cfg.Checks,
+		"tone_target":    s.cfg.ToneTarget,
+		"style_rules":    s.cfg.StyleRules,
+		"disabled_rules": s.cfg.DisabledRules,
+		"provider":       s.cfg.Provider,
+		"listen_host":    s.cfg.ListenHost,
+		"port":           s.cfg.Port,
+	})
+}
+
+func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
+	var p settingsPayload
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&p); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	if !validToneTargets[p.ToneTarget] {
+		writeErr(w, http.StatusBadRequest, "invalid tone_target")
+		return
+	}
+	if len(p.StyleRules) > 50 || len(p.DisabledRules) > 100 {
+		writeErr(w, http.StatusBadRequest, "too many rules")
+		return
+	}
+	s.mu.Lock()
+	s.cfg.Checks = p.Checks
+	s.cfg.ToneTarget = p.ToneTarget
+	s.cfg.StyleRules = cleanLines(p.StyleRules, 200)
+	s.cfg.DisabledRules = cleanLines(p.DisabledRules, 60)
+	if p.Model != "" {
+		s.cfg.Provider.Model = p.Model
+	}
+	err := s.cfg.Save()
+	s.mu.Unlock()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "save config: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func cleanLines(in []string, maxLen int) []string {
+	var out []string
+	for _, l := range in {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		if len(l) > maxLen {
+			l = l[:maxLen]
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+// --- pairing API -------------------------------------------------------
+
+func (s *Server) handlePairRequest(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Client string `json:"client"`
+	}
+	json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req)
+	id, err := s.pairings.Create(req.Client)
+	if err != nil {
+		writeErr(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": id})
+}
+
+func (s *Server) handlePairPoll(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	status := s.pairings.Poll(id)
+	resp := map[string]any{"status": status}
+	if status == pairing.StatusApproved {
+		s.mu.RLock()
+		resp["token"] = s.cfg.PairingToken
+		resp["port"] = s.cfg.Port
+		s.mu.RUnlock()
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handlePairPending(w http.ResponseWriter, r *http.Request) {
+	p := s.pairings.Pending()
+	if p == nil {
+		p = []pairing.Request{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"pending": p})
+}
+
+func (s *Server) handlePairDecide(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID      string `json:"id"`
+		Approve bool   `json:"approve"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		writeErr(w, http.StatusBadRequest, "body must be {\"id\":\"...\",\"approve\":bool}")
+		return
+	}
+	var ok bool
+	if req.Approve {
+		ok = s.pairings.Approve(req.ID)
+	} else {
+		ok = s.pairings.Deny(req.ID)
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": ok})
 }
 
 // ndjsonWriter streams one JSON object per line with immediate flushing —
@@ -198,7 +349,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	s.cfg.SetupComplete = true
 	// The 1.7B fallback can't handle style categories reliably.
 	if m, ok := catalog.ByTag(req.Model); ok && m.MinRAMGB <= 3 {
-		s.cfg.Categories = []string{"correctness"}
+		s.cfg.Checks = config.Checks{Spelling: true, Grammar: true}
 	}
 	err := s.cfg.Save()
 	s.mu.Unlock()

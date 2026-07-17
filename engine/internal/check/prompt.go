@@ -6,14 +6,59 @@ import (
 	"github.com/steveharsant/tone/engine/internal/provider"
 )
 
-// categoryBriefs are the editing lenses the model may use. Which ones are
-// active is driven by config — Phase 1 ships correctness+clarity, Phase 3
-// turns on engagement+delivery with no pipeline changes.
-var categoryBriefs = map[string]string{
-	CategoryCorrectness: `"correctness": objective errors — spelling, grammar, punctuation, verb agreement, wrong or missing articles, incorrect word forms.`,
-	CategoryClarity:     `"clarity": wordiness, redundancy, convoluted phrasing, passive voice where active reads better. The replacement must preserve meaning while being shorter or plainer.`,
-	CategoryEngagement:  `"engagement": dull, vague, or repetitive word choice. Suggest a stronger or more precise word only when the improvement is obvious.`,
-	CategoryDelivery:    `"delivery": tone problems — hedging, unintended bluntness, over-apologizing, mismatched formality.`,
+// Options carries everything that shapes a check: which lenses are active,
+// the target voice, and the user's own style rules. All fields participate
+// in the cache key — changing any of them invalidates cached results.
+type Options struct {
+	Spelling   bool
+	Grammar    bool
+	Clarity    bool
+	Vocabulary bool
+	Tone       bool
+	// ToneTarget: "", "formal", "casual", "confident", "friendly", "academic".
+	ToneTarget string
+	// StyleRules are user-authored constraints, e.g. "Do not use contractions".
+	StyleRules []string
+	// DisabledRules suppresses suggestions whose rule slug matches
+	// (case-insensitive, dashes/spaces interchangeable).
+	DisabledRules []string
+}
+
+// AllowedCategories is the set of wire categories the enabled checks can emit.
+func (o Options) AllowedCategories() map[string]bool {
+	m := map[string]bool{}
+	if o.Spelling || o.Grammar {
+		m[CategoryCorrectness] = true
+	}
+	if o.Clarity {
+		m[CategoryClarity] = true
+	}
+	if o.Vocabulary {
+		m[CategoryEngagement] = true
+	}
+	if o.Tone || len(o.StyleRules) > 0 {
+		// Style-rule violations report as "delivery" even with the tone
+		// check off — the user asked for those rules explicitly.
+		m[CategoryDelivery] = true
+	}
+	return m
+}
+
+// key serializes the prompt-affecting state for cache keying.
+func (o Options) key() string {
+	var sb strings.Builder
+	for _, b := range []bool{o.Spelling, o.Grammar, o.Clarity, o.Vocabulary, o.Tone} {
+		if b {
+			sb.WriteByte('1')
+		} else {
+			sb.WriteByte('0')
+		}
+	}
+	sb.WriteByte('|')
+	sb.WriteString(o.ToneTarget)
+	sb.WriteByte('|')
+	sb.WriteString(strings.Join(o.StyleRules, "\x1f"))
+	return sb.String()
 }
 
 const systemPreamble = `You are a precise copy editor inside a writing assistant. You receive one passage of text. Find problems and return them as JSON.
@@ -32,18 +77,41 @@ Hard rules:
 - Do not invent problems. Correct text gets {"suggestions":[]}.
 - Do not comment on stylistic choices that are already acceptable.
 
-Allowed categories:`
+Only look for the problem types listed below, and use exactly the category slug shown for each:`
 
-// buildMessages assembles the chat for one segment.
-func buildMessages(segText string, categories []string) []provider.Message {
+func buildMessages(segText string, opts Options) []provider.Message {
 	var sb strings.Builder
 	sb.WriteString(systemPreamble)
-	for _, cat := range categories {
-		if brief, ok := categoryBriefs[cat]; ok {
-			sb.WriteString("\n- ")
-			sb.WriteString(brief)
+
+	if opts.Spelling {
+		sb.WriteString("\n- category \"correctness\": spelling mistakes and typos.")
+	}
+	if opts.Grammar {
+		sb.WriteString("\n- category \"correctness\": grammar and punctuation errors — verb agreement, tense, articles, commas, apostrophes.")
+	}
+	if opts.Clarity {
+		sb.WriteString("\n- category \"clarity\": wordiness, redundancy, convoluted phrasing, passive voice where active reads better. The replacement must preserve meaning while being shorter or plainer.")
+	}
+	if opts.Vocabulary {
+		sb.WriteString("\n- category \"engagement\": dull, vague, or repetitive word choice. Suggest a stronger or more precise word only when the improvement is obvious.")
+	}
+	if opts.Tone {
+		sb.WriteString("\n- category \"delivery\": tone problems — hedging, unintended bluntness, over-apologizing, mismatched formality.")
+		if opts.ToneTarget != "" {
+			sb.WriteString(" The writer wants a " + opts.ToneTarget + " tone; flag wording that clearly works against it and suggest a replacement that fits.")
 		}
 	}
+
+	if len(opts.StyleRules) > 0 {
+		sb.WriteString("\n\nThe writer also enforces these personal style rules. Flag violations (category \"delivery\", rule \"style-rule\") and never suggest anything that would break them:")
+		for _, r := range opts.StyleRules {
+			r = strings.TrimSpace(r)
+			if r != "" {
+				sb.WriteString("\n- " + r)
+			}
+		}
+	}
+
 	return []provider.Message{
 		{Role: "system", Content: sb.String()},
 		{Role: "user", Content: segText},

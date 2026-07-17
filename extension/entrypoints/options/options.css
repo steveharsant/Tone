@@ -29,7 +29,10 @@ input, textarea {
   border: 1px solid var(--border); border-radius: 7px;
   background: var(--bg); color: var(--text); font: inherit;
 }
-.row { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 10px; }
+.row { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 10px; flex-wrap: wrap; }
+.grid { display: grid; grid-template-columns: 90px 1fr 90px; gap: 10px; }
+select { display: block; width: 100%; margin-top: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text); font: inherit; }
+[hidden] { display: none !important; }
 button {
   background: var(--accent); color: #fff; border: 0; border-radius: 7px;
   padding: 7px 14px; font: inherit; cursor: pointer;
