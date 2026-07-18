@@ -7,6 +7,7 @@ import { defineContentScript } from '#imports';
 import { browser } from 'wxt/browser';
 import { StatusIndicator } from '@/lib/indicator';
 import { Popover } from '@/lib/popover';
+import { Rewriter } from '@/lib/rewriter';
 import { FieldSession, type EditableKind } from '@/lib/session';
 import { CATEGORY_COLORS, type SiteStatus, type Suggestion } from '@/lib/types';
 
@@ -72,6 +73,17 @@ export default defineContentScript({
         void browser.runtime.sendMessage({ type: 'tone:addWord', word: s.original.trim() }).catch(() => {});
         for (const session of sessions) session.removeByWord(s.original);
       },
+      onSnooze: (s: Suggestion) => popoverOwner?.snooze(s, 24),
+    });
+
+    // Selection rewrites: "✦ Rewrite" button on selections in tracked fields.
+    new Rewriter((target) => {
+      if (target instanceof HTMLElement) {
+        for (const session of sessions) {
+          if (session.el === target || session.el.contains(target)) return session;
+        }
+      }
+      return null;
     });
 
     let lastMove = 0;

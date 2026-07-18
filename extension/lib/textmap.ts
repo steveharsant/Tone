@@ -92,6 +92,47 @@ export function resolvePoint(map: TextMap, offset: number): DomPoint | null {
   return { node: run.node, offset: within };
 }
 
+/**
+ * Maps a DOM point (e.g. a selection boundary) back to a text offset — the
+ * inverse of resolvePoint. Element-node boundaries resolve to the nearest
+ * text position at or after the boundary, falling back to the nearest one
+ * before it.
+ */
+export function pointToOffset(map: TextMap, node: Node, offset: number): number | null {
+  if (node.nodeType === Node.TEXT_NODE) {
+    for (const run of map.runs) {
+      if (run.node === node) return run.start + Math.min(offset, run.node.data.length);
+    }
+    return null;
+  }
+  if (!(node instanceof Element)) return null;
+  const children = node.childNodes;
+  for (let i = offset; i < children.length; i++) {
+    const first = edgeText(children[i], true);
+    if (first) {
+      for (const run of map.runs) if (run.node === first) return run.start;
+    }
+  }
+  for (let i = Math.min(offset, children.length) - 1; i >= 0; i--) {
+    const last = edgeText(children[i], false);
+    if (last) {
+      for (const run of map.runs) if (run.node === last) return run.start + last.data.length;
+    }
+  }
+  return null;
+}
+
+function edgeText(node: Node, first: boolean): Text | null {
+  if (node.nodeType === Node.TEXT_NODE) return node as Text;
+  const kids = Array.from(node.childNodes);
+  if (!first) kids.reverse();
+  for (const kid of kids) {
+    const t = edgeText(kid, first);
+    if (t) return t;
+  }
+  return null;
+}
+
 /** Builds a DOM Range for a suggestion span; null if either end is unmappable. */
 export function rangeFromSpan(map: TextMap, start: number, end: number): Range | null {
   if (end <= start) return null;

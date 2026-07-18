@@ -11,7 +11,7 @@
 
 import { browser } from 'wxt/browser';
 import { measureSpans, toViewport, isVisibleIn, type FormField, type RelativeRect } from './mirror';
-import { buildTextMap, rangeFromSpan, type TextMap } from './textmap';
+import { buildTextMap, pointToOffset, rangeFromSpan, type TextMap } from './textmap';
 import { CATEGORY_COLORS, type CheckStreamMessage, type Suggestion } from './types';
 
 /** A suggestion tagged with the priority tier that produced it. */
@@ -184,7 +184,8 @@ export class FieldSession {
       if ('done' in msg) {
         this.lastCheckedText = text;
         const n = this.suggestions.length;
-        this.onState('done', n === 0 ? 'Looks good' : `${n} suggestion${n === 1 ? '' : 's'}`);
+        const scorePart = typeof msg.score === 'number' ? `Score ${msg.score} · ` : '';
+        this.onState('done', scorePart + (n === 0 ? 'Looks good' : `${n} suggestion${n === 1 ? '' : 's'}`));
         this.finishCheck(port);
         return;
       }
@@ -355,21 +356,28 @@ export class FieldSession {
   // --- actions -----------------------------------------------------------
 
   accept(s: Suggestion): void {
+    this.replaceRange(s.span.start, s.span.end, s.original, s.replacement);
+  }
+
+  /**
+   * Replaces [start,end) with replacement, but only if the text there still
+   * equals `original` — the shared safety gate for accepts and rewrites.
+   */
+  replaceRange(start: number, end: number, original: string, replacement: string): boolean {
     if (this.kind === 'form') {
       const el = this.el as FormField;
-      // Guard against drift: only apply if the text still matches.
-      if (el.value.slice(s.span.start, s.span.end) !== s.original) return;
+      if (el.value.slice(start, end) !== original) return false;
       el.focus();
-      el.setRangeText(s.replacement, s.span.start, s.span.end, 'end');
+      el.setRangeText(replacement, start, end, 'end');
       el.dispatchEvent(new InputEvent('input', { bubbles: true }));
-      return; // the input event clears + reschedules
+      return true; // the input event shifts spans + reschedules
     }
     const map = buildTextMap(this.el);
-    if (map.text.slice(s.span.start, s.span.end) !== s.original) return;
-    const range = rangeFromSpan(map, s.span.start, s.span.end);
-    if (!range) return;
+    if (map.text.slice(start, end) !== original) return false;
+    const range = rangeFromSpan(map, start, end);
+    if (!range) return false;
     range.deleteContents();
-    range.insertNode(document.createTextNode(s.replacement));
+    range.insertNode(document.createTextNode(replacement));
     const sel = window.getSelection();
     if (sel) {
       range.collapse(false);
@@ -377,13 +385,61 @@ export class FieldSession {
       sel.addRange(range);
     }
     this.el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    return true;
   }
 
-  dismiss(s: Suggestion): void {
+  /**
+   * The user's current selection as a span in this session's text, or null
+   * when there is no usable selection in this field.
+   */
+  getSelectionSpan(): { start: number; end: number; text: string } | null {
+    if (this.kind === 'form') {
+      const el = this.el as FormField;
+      const s = el.selectionStart;
+      const e = el.selectionEnd;
+      if (s == null || e == null || e <= s) return null;
+      return { start: s, end: e, text: el.value.slice(s, e) };
+    }
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    if (!this.el.contains(range.commonAncestorContainer)) return null;
+    const map = buildTextMap(this.el);
+    const start = pointToOffset(map, range.startContainer, range.startOffset);
+    const end = pointToOffset(map, range.endContainer, range.endOffset);
+    if (start == null || end == null || end <= start) return null;
+    return { start, end, text: map.text.slice(start, end) };
+  }
+
+  /** Selection rectangle in viewport coordinates (for anchoring UI). */
+  selectionRect(span: { start: number; end: number }): DOMRect | null {
+    if (this.kind === 'form') {
+      const rects = measureSpans(this.el as FormField, [span]);
+      const last = rects[0]?.[rects[0].length - 1];
+      return last ? toViewport(this.el as FormField, last) : null;
+    }
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    const r = sel.getRangeAt(0).getBoundingClientRect();
+    return r.width || r.height ? r : null;
+  }
+
+  snooze(s: Suggestion, hours: number): void {
+    this.dismissedLocallyOnly(s);
+    void browser.runtime
+      .sendMessage({ type: 'tone:dismiss', category: s.category, original: s.original, hours })
+      .catch(() => {});
+  }
+
+  private dismissedLocallyOnly(s: Suggestion): void {
     this.dismissed.add(keyOf(s));
     this.suggestions = this.suggestions.filter((x) => x.id !== s.id);
     this.clearRender();
     this.render();
+  }
+
+  dismiss(s: Suggestion): void {
+    this.dismissedLocallyOnly(s);
     // Durable: the engine remembers dismissals across reloads and devices.
     void browser.runtime
       .sendMessage({ type: 'tone:dismiss', category: s.category, original: s.original })

@@ -76,12 +76,41 @@
   </section>
 
   <section class="card">
-    <h2>Model</h2>
-    <label>Active model
-      <select id="model-select"></select>
+    <h2>Provider &amp; model</h2>
+    <label>Provider
+      <select id="provider-select">
+        <option value="ollama">Local (Ollama) — private, free</option>
+        <option value="openai">OpenAI</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="anthropic">Anthropic</option>
+      </select>
     </label>
-    <p class="hint">Only downloaded models are listed — use the wizard to add more.</p>
-    <a id="rerun-setup" href="/setup"><button class="ghost">Open setup wizard</button></a>
+    <div id="local-model-row">
+      <label>Model
+        <select id="model-select"></select>
+      </label>
+      <p class="hint">Only downloaded models are listed — use the wizard to add more.</p>
+      <a id="rerun-setup" href="/setup"><button class="ghost">Open setup wizard</button></a>
+    </div>
+    <div id="cloud-model-row" class="hidden">
+      <label>Model name
+        <input id="cloud-model" type="text" spellcheck="false"
+               placeholder="e.g. gpt-4o-mini · deepseek-chat · claude-haiku-4-5">
+      </label>
+      <label>API key
+        <input id="cloud-key" type="password" autocomplete="off" spellcheck="false"
+               placeholder="paste to store in the OS keychain">
+      </label>
+      <div class="row">
+        <span class="hint" id="key-status"></span>
+        <span>
+          <button id="key-delete" class="ghost">Remove key</button>
+          <button id="key-save" class="ghost">Save key</button>
+        </span>
+      </div>
+      <p class="hint">Keys live in your OS keychain, never in config files. Cloud
+      checks send your text to that provider — use Local for anything sensitive.</p>
+    </div>
   </section>
 
   <section class="card">

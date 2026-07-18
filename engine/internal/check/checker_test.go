@@ -202,3 +202,55 @@ func TestCheckTieredEmitsAllTiersConcurrently(t *testing.T) {
 		t.Errorf("per-tier counts = %v", got)
 	}
 }
+
+func TestScore(t *testing.T) {
+	text := "This is a twenty word sentence used for scoring the writing quality of a document with some words padded."
+	if got := Score(text, nil); got != 100 {
+		t.Errorf("clean text score = %d, want 100", got)
+	}
+	one := []Suggestion{{Category: CategoryCorrectness}}
+	got := Score(text, one)
+	if got >= 100 || got < 60 {
+		t.Errorf("one error in ~19 words = %d, want moderate penalty", got)
+	}
+	many := []Suggestion{
+		{Category: CategoryCorrectness}, {Category: CategoryCorrectness},
+		{Category: CategoryCorrectness}, {Category: CategoryCorrectness},
+		{Category: CategoryCorrectness}, {Category: CategoryCorrectness},
+	}
+	if got := Score("short bad text here", many); got != 0 {
+		t.Errorf("error-dense text = %d, want 0", got)
+	}
+	if got := Score("", nil); got != 100 {
+		t.Errorf("empty text = %d, want 100", got)
+	}
+}
+
+func TestCleanRewriteOutput(t *testing.T) {
+	cases := map[string]string{
+		"\"Hello there.\"":              "Hello there.",
+		"```\nHello there.\n```":        "Hello there.",
+		"```text\nHello there.\n```":    "Hello there.",
+		"  Hello there.  ":              "Hello there.",
+		`He said "hi" and "bye" today.`: `He said "hi" and "bye" today.`, // interior quotes stay
+	}
+	for in, want := range cases {
+		if got := CleanRewriteOutput(in); got != want {
+			t.Errorf("CleanRewriteOutput(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestParseRewriteOutput(t *testing.T) {
+	cases := map[string]string{
+		`{"rewritten":"Hello there."}`:                      "Hello there.",
+		"```json\n{\"rewritten\":\"Hello there.\"}\n```":    "Hello there.",
+		`plain prose fallback with no json braces`:          "plain prose fallback with no json braces",
+		`{"rewritten":""}`:                                  `{"rewritten":""}`, // empty JSON → fall back to raw
+	}
+	for in, want := range cases {
+		if got := ParseRewriteOutput(in); got != want {
+			t.Errorf("ParseRewriteOutput(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

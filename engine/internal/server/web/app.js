@@ -31,6 +31,7 @@
     }
   }
 
+  let keyPresence = {};
   async function loadSettings() {
     const s = await (await api('/api/settings')).json();
     $('chk-spelling').checked = s.checks.spelling;
@@ -41,6 +42,10 @@
     $('tone-target').value = s.tone_target || '';
     $('style-rules').value = (s.style_rules || []).join('\n');
     $('disabled-rules').value = (s.disabled_rules || []).join('\n');
+    keyPresence = s.keys || {};
+    $('provider-select').value = s.provider.type || 'ollama';
+    if (s.provider.type !== 'ollama') $('cloud-model').value = s.provider.model || '';
+    updateProviderUI();
 
     const status = await (await api('/api/setup/status')).json();
     const sel = $('model-select');
@@ -55,6 +60,43 @@
       sel.appendChild(opt);
     }
   }
+
+  function updateProviderUI() {
+    const p = $('provider-select').value;
+    const local = p === 'ollama';
+    $('local-model-row').classList.toggle('hidden', !local);
+    $('cloud-model-row').classList.toggle('hidden', local);
+    if (!local) {
+      $('key-status').textContent = keyPresence[p]
+        ? 'API key stored in keychain ✓'
+        : 'No API key stored for this provider.';
+    }
+  }
+  $('provider-select').addEventListener('change', updateProviderUI);
+
+  $('key-save').onclick = async () => {
+    const providerName = $('provider-select').value;
+    const key = $('cloud-key').value.trim();
+    if (!key) return;
+    const r = await api('/api/settings/key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: providerName, key }),
+    });
+    $('cloud-key').value = '';
+    keyPresence[providerName] = r.ok;
+    $('key-status').textContent = r.ok ? 'API key stored in keychain ✓' : 'Failed to store key.';
+  };
+  $('key-delete').onclick = async () => {
+    const providerName = $('provider-select').value;
+    await api('/api/settings/key', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: providerName }),
+    });
+    keyPresence[providerName] = false;
+    updateProviderUI();
+  };
 
   async function loadPairing() {
     try {
@@ -143,6 +185,7 @@
 
   $('save').onclick = async () => {
     const lines = (v) => v.split('\n').map((l) => l.trim()).filter(Boolean);
+    const providerType = $('provider-select').value;
     const body = {
       checks: {
         spelling: $('chk-spelling').checked,
@@ -154,7 +197,10 @@
       tone_target: $('tone-target').value,
       style_rules: lines($('style-rules').value),
       disabled_rules: lines($('disabled-rules').value),
-      model: $('model-select').value || undefined,
+      provider: {
+        type: providerType,
+        model: providerType === 'ollama' ? $('model-select').value : $('cloud-model').value.trim(),
+      },
     };
     const r = await api('/api/settings', {
       method: 'POST',

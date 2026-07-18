@@ -21,6 +21,7 @@ import (
 	"github.com/steveharsant/tone/engine/internal/ollama"
 	"github.com/steveharsant/tone/engine/internal/pairing"
 	"github.com/steveharsant/tone/engine/internal/provider"
+	"github.com/steveharsant/tone/engine/internal/secrets"
 	"github.com/steveharsant/tone/engine/internal/store"
 )
 
@@ -36,6 +37,10 @@ type Server struct {
 	cache    *check.Cache
 	pairings *pairing.Store
 	memory   *store.Store
+	// apiKey caches the active cloud provider's key so the keychain (a D-Bus
+	// round trip on Linux) isn't hit per request. Cleared on settings/key
+	// changes. Never serialized.
+	apiKey string
 
 	pullMu sync.Mutex
 	pull   pullState
@@ -91,28 +96,65 @@ func (s *Server) SettingsURL() string {
 	return fmt.Sprintf("http://127.0.0.1:%d/#%s", s.cfg.Port, s.cfg.PairingToken)
 }
 
-// checker builds a Checker for the current provider config. The cache is
-// shared across rebuilds; its keys include the model, so switching models
-// never serves stale results.
-func (s *Server) checker() (*check.Checker, error) {
+// provider builds the configured backend. Cloud API keys come from the OS
+// keychain (cached in memory); they never appear in config, logs, or
+// responses.
+func (s *Server) provider() (provider.Provider, string, error) {
 	s.mu.RLock()
 	p := s.cfg.Provider
+	cachedKey := s.apiKey
 	s.mu.RUnlock()
 
-	var prov provider.Provider
+	if p.Model == "" {
+		return nil, "", fmt.Errorf("no model configured — set one in settings")
+	}
+
 	switch p.Type {
 	case config.ProviderOllama:
 		// Native API, not OpenAI-compat: only /api/chat accepts think:false,
 		// which hybrid reasoning models (qwen3) need to answer promptly.
-		prov = provider.NewOllamaNative(strings.TrimSuffix(p.BaseURL, "/"))
-	default:
-		// Cloud providers land in Phase 2 alongside keychain storage.
-		return nil, fmt.Errorf("provider %q is not available yet", p.Type)
+		return provider.NewOllamaNative(strings.TrimSuffix(p.BaseURL, "/")), p.Model, nil
+
+	case config.ProviderOpenAI, config.ProviderDeepSeek, config.ProviderAnthropic:
+		key := cachedKey
+		if key == "" {
+			var err error
+			key, err = secrets.GetAPIKey(p.Type)
+			if err != nil || key == "" {
+				return nil, "", fmt.Errorf("no API key stored for %s — add one on the settings page", p.Type)
+			}
+			s.mu.Lock()
+			s.apiKey = key
+			s.mu.Unlock()
+		}
+		base := strings.TrimSuffix(p.BaseURL, "/")
+		switch p.Type {
+		case config.ProviderAnthropic:
+			return provider.NewAnthropic(base, key), p.Model, nil
+		case config.ProviderDeepSeek:
+			if base == "" || strings.Contains(base, "11434") {
+				base = "https://api.deepseek.com/v1"
+			}
+			return provider.NewOpenAICompat("deepseek", base, key), p.Model, nil
+		default:
+			if base == "" || strings.Contains(base, "11434") {
+				base = "https://api.openai.com/v1"
+			}
+			return provider.NewOpenAICompat("openai", base, key), p.Model, nil
+		}
 	}
-	if p.Model == "" {
-		return nil, fmt.Errorf("no model configured — run setup first")
+	return nil, "", fmt.Errorf("unknown provider %q", p.Type)
+}
+
+// checker builds a Checker for the current provider config. The cache is
+// shared across rebuilds; its keys include the model, so switching models
+// never serves stale results.
+func (s *Server) checker() (*check.Checker, error) {
+	prov, model, err := s.provider()
+	if err != nil {
+		return nil, err
 	}
-	return check.New(prov, p.Model, s.cache), nil
+	return check.New(prov, model, s.cache), nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -120,6 +162,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Extension API.
 	mux.HandleFunc("POST /v1/check", s.auth(s.handleCheck))
+	mux.HandleFunc("POST /v1/rewrite", s.auth(s.handleRewrite))
 	mux.HandleFunc("GET /v1/health", s.auth(s.handleHealth))
 
 	// Setup/settings API (used by the embedded pages).
@@ -130,6 +173,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/setup/complete", s.auth(s.handleSetupComplete))
 	mux.HandleFunc("GET /api/settings", s.auth(s.handleGetSettings))
 	mux.HandleFunc("POST /api/settings", s.auth(s.handleSaveSettings))
+	mux.HandleFunc("POST /api/settings/key", s.auth(s.handleSetKey))
+	mux.HandleFunc("DELETE /api/settings/key", s.auth(s.handleDeleteKey))
 
 	// Editorial memory: mute a rule type, remember dismissals, dictionary.
 	mux.HandleFunc("POST /v1/rules/ignore", s.auth(s.handleIgnoreRule))

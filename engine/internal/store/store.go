@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -23,6 +24,13 @@ const (
 type Dismissal struct {
 	Category string `json:"category"`
 	Original string `json:"original"`
+	// Expires makes this a snooze rather than a permanent dismissal.
+	// Zero means forever.
+	Expires time.Time `json:"expires,omitempty"`
+}
+
+func (d Dismissal) expired(now time.Time) bool {
+	return !d.Expires.IsZero() && now.After(d.Expires)
 }
 
 type data struct {
@@ -121,21 +129,28 @@ func (s *Store) HasWord(w string) bool {
 	return false
 }
 
-// AddDismissal records a rejected suggestion (idempotent).
-func (s *Store) AddDismissal(category, original string) error {
+// AddDismissal records a rejected suggestion. A non-zero ttl makes it a
+// snooze that silently expires; ttl 0 means forever. Re-adding replaces the
+// previous entry (so snoozing then dismissing upgrades to permanent).
+func (s *Store) AddDismissal(category, original string, ttl time.Duration) error {
 	category = strings.TrimSpace(strings.ToLower(category))
 	original = strings.TrimSpace(original)
 	if category == "" || original == "" || len(original) > 500 {
 		return nil
 	}
+	entry := Dismissal{Category: category, Original: original}
+	if ttl > 0 {
+		entry.Expires = time.Now().Add(ttl)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	kept := s.d.Dismissed[:0]
 	for _, d := range s.d.Dismissed {
-		if d.Category == category && d.Original == original {
-			return nil
+		if !(d.Category == category && d.Original == original) && !d.expired(time.Now()) {
+			kept = append(kept, d)
 		}
 	}
-	s.d.Dismissed = append(s.d.Dismissed, Dismissal{Category: category, Original: original})
+	s.d.Dismissed = append(kept, entry)
 	if len(s.d.Dismissed) > maxDismissed {
 		s.d.Dismissed = s.d.Dismissed[len(s.d.Dismissed)-maxDismissed:]
 	}
@@ -145,10 +160,11 @@ func (s *Store) AddDismissal(category, original string) error {
 func (s *Store) IsDismissed(category, original string) bool {
 	category = strings.TrimSpace(strings.ToLower(category))
 	original = strings.TrimSpace(original)
+	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, d := range s.d.Dismissed {
-		if d.Category == category && d.Original == original {
+		if d.Category == category && d.Original == original && !d.expired(now) {
 			return true
 		}
 	}

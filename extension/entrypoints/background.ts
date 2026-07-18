@@ -7,7 +7,7 @@
 
 import { defineBackground } from '#imports';
 import { browser } from 'wxt/browser';
-import { DEFAULT_SETTINGS, type CheckResult, type HealthResult, type PairResult, type SiteStatus, type Suggestion, type ToneSettings } from '@/lib/types';
+import { DEFAULT_SETTINGS, type CheckResult, type HealthResult, type PairResult, type RewriteResult, type SiteStatus, type Suggestion, type ToneSettings } from '@/lib/types';
 
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener((msg: unknown, sender) => {
@@ -22,8 +22,12 @@ export default defineBackground(() => {
       case 'tone:pair':
         return pair();
       case 'tone:dismiss': {
-        const d = msg as { category?: string; original?: string };
-        return enginePost('/v1/dismissals', { category: d.category, original: d.original });
+        const d = msg as { category?: string; original?: string; hours?: number };
+        return enginePost('/v1/dismissals', { category: d.category, original: d.original, hours: d.hours });
+      }
+      case 'tone:rewrite': {
+        const d = msg as { text?: string; tone?: string; instruction?: string };
+        return rewrite(d.text ?? '', d.tone, d.instruction);
       }
       case 'tone:ignoreRule': {
         const d = msg as { rule?: string };
@@ -211,6 +215,27 @@ async function checkText(text: string): Promise<CheckResult> {
   } catch {
     await setBadge('off');
     return { ok: false, error: 'engine_unreachable', disconnected: true };
+  }
+}
+
+async function rewrite(text: string, tone?: string, instruction?: string): Promise<RewriteResult> {
+  const settings = await getSettings();
+  if (!settings.token) return { ok: false, error: 'not_paired' };
+  try {
+    const resp = await fetch(engineURL(settings, '/v1/rewrite'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${settings.token}`,
+      },
+      body: JSON.stringify({ text, tone, instruction }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    const data = (await resp.json().catch(() => ({}))) as { rewritten?: string; error?: string };
+    if (!resp.ok || !data.rewritten) return { ok: false, error: data.error ?? `HTTP ${resp.status}` };
+    return { ok: true, rewritten: data.rewritten };
+  } catch {
+    return { ok: false, error: 'engine_unreachable' };
   }
 }
 

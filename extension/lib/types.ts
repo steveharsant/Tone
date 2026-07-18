@@ -45,8 +45,21 @@ export type CheckResult =
  */
 export type CheckStreamMessage =
   | { tier: string; suggestions: Suggestion[] }
-  | { done: true }
+  | { done: true; score?: number }
   | { error: string; disconnected?: boolean };
+
+export type RewriteResult =
+  | { ok: true; rewritten: string }
+  | { ok: false; error: string };
+
+/** Selectable voices for the rewrite menu (mirrors the engine's list). */
+export const REWRITE_TONES = [
+  ['formal', 'More formal'],
+  ['casual', 'More casual'],
+  ['confident', 'More confident'],
+  ['friendly', 'More friendly'],
+  ['concise', 'More concise'],
+] as const;
 
 export type HealthResult =
   | { ok: true; status: string; model?: string }

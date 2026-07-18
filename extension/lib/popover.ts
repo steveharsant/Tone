@@ -12,6 +12,8 @@ export interface PopoverActions {
   onIgnoreRule: (s: Suggestion) => void;
   /** Add the flagged word to the custom dictionary. */
   onAddWord: (s: Suggestion) => void;
+  /** Hide this exact suggestion for a while (24h). */
+  onSnooze: (s: Suggestion) => void;
 }
 
 const STYLE = `
@@ -121,8 +123,18 @@ export class Popover {
     };
     row.append(accept, dismiss);
 
-    // Secondary, quieter actions: permanent mutes.
+    // Secondary, quieter actions: snooze and permanent mutes.
     const more = el('div', 'more');
+    {
+      const snooze = el('button', 'snooze') as HTMLButtonElement;
+      snooze.textContent = 'Snooze 24h';
+      snooze.title = 'Hide this suggestion until tomorrow';
+      snooze.onclick = () => {
+        this.actions.onSnooze(s);
+        this.hide();
+      };
+      more.append(snooze);
+    }
     if (s.rule) {
       const ignore = el('button', 'ignore') as HTMLButtonElement;
       ignore.textContent = `Ignore all “${s.rule}”`;

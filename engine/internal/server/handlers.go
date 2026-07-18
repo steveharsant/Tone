@@ -12,6 +12,8 @@ import (
 	"github.com/steveharsant/tone/engine/internal/config"
 	"github.com/steveharsant/tone/engine/internal/ollama"
 	"github.com/steveharsant/tone/engine/internal/pairing"
+	"github.com/steveharsant/tone/engine/internal/provider"
+	"github.com/steveharsant/tone/engine/internal/secrets"
 )
 
 const maxCheckBytes = 256 << 10
@@ -39,6 +41,7 @@ type checkRequest struct {
 type checkResponse struct {
 	Suggestions []check.Suggestion `json:"suggestions"`
 	Stats       check.Stats        `json:"stats"`
+	Score       int                `json:"score"`
 }
 
 func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
@@ -72,18 +75,20 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 
 	if req.Stream || r.URL.Query().Get("stream") == "1" {
 		out := newNDJSON(w)
+		var all []check.Suggestion
 		err := chk.CheckTiered(r.Context(), req.Text, opts, func(tier string, sugs []check.Suggestion, stats check.Stats) {
 			sugs = s.filterStored(sugs)
 			if sugs == nil {
 				sugs = []check.Suggestion{}
 			}
+			all = append(all, sugs...) // emit callback is serialized by CheckTiered
 			out.send(map[string]any{"tier": tier, "suggestions": sugs, "stats": stats})
 		})
 		if err != nil && r.Context().Err() == nil {
 			out.send(map[string]any{"error": "provider error: " + err.Error()})
 			return
 		}
-		out.send(map[string]any{"done": true})
+		out.send(map[string]any{"done": true, "score": check.Score(req.Text, all)})
 		return
 	}
 
@@ -110,7 +115,69 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	if sugs == nil {
 		sugs = []check.Suggestion{}
 	}
-	writeJSON(w, http.StatusOK, checkResponse{Suggestions: sugs, Stats: stats})
+	writeJSON(w, http.StatusOK, checkResponse{Suggestions: sugs, Stats: stats, Score: check.Score(req.Text, sugs)})
+}
+
+// --- /v1/rewrite -------------------------------------------------------
+
+const maxRewriteBytes = 20 << 10
+
+// handleRewrite rewrites a selection in a requested voice ("formal") or per
+// a free-form instruction ("make this more concise"). Returns plain text.
+func (s *Server) handleRewrite(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Text        string `json:"text"`
+		Tone        string `json:"tone,omitempty"`
+		Instruction string `json:"instruction,omitempty"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRewriteBytes)).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Text) == "" {
+		writeErr(w, http.StatusBadRequest, "text is required")
+		return
+	}
+	if req.Tone != "" && !validRewriteTones[req.Tone] {
+		writeErr(w, http.StatusBadRequest, "invalid tone")
+		return
+	}
+	if len(req.Instruction) > 300 {
+		writeErr(w, http.StatusBadRequest, "instruction too long")
+		return
+	}
+
+	s.mu.RLock()
+	styleRules := append([]string(nil), s.cfg.StyleRules...)
+	s.mu.RUnlock()
+
+	prov, model, err := s.provider()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	content, err := prov.Complete(r.Context(), provider.Request{
+		Model:       model,
+		Messages:    check.BuildRewriteMessages(req.Text, req.Tone, req.Instruction, styleRules),
+		Temperature: 0.4,
+		MaxTokens:   len(req.Text)/2 + 800,
+		JSONMode:    true, // constrained decoding stops reasoning models from thinking out loud
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "provider error: "+err.Error())
+		return
+	}
+	rewritten := check.ParseRewriteOutput(content)
+	if rewritten == "" {
+		writeErr(w, http.StatusBadGateway, "model returned no rewrite")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"rewritten": rewritten})
+}
+
+var validRewriteTones = map[string]bool{
+	"formal": true, "casual": true, "confident": true,
+	"friendly": true, "academic": true, "concise": true,
 }
 
 // --- /v1/health --------------------------------------------------------
@@ -126,10 +193,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	st := s.mgr.Status(ctx)
 
 	status := "ok"
+	isCloud := prov.Type != config.ProviderOllama
 	if !setupDone {
 		status = "setup_required"
-	} else if prov.Type == "ollama" && !st.Running {
+	} else if !isCloud && !st.Running {
 		status = "backend_unavailable"
+	} else if isCloud {
+		s.mu.RLock()
+		haveKey := s.apiKey != ""
+		s.mu.RUnlock()
+		if !haveKey && !secrets.HasAPIKey(prov.Type) {
+			status = "backend_unavailable"
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":         status,
@@ -172,7 +247,20 @@ type settingsPayload struct {
 	StyleRules    []string      `json:"style_rules"`
 	DisabledRules []string      `json:"disabled_rules"`
 	Model         string        `json:"model,omitempty"`
+	// Provider switches the LLM backend. The API key is NOT part of this
+	// payload — it goes through /api/settings/key into the OS keychain.
+	Provider *struct {
+		Type  string `json:"type"`
+		Model string `json:"model"`
+	} `json:"provider,omitempty"`
 }
+
+var validProviderTypes = map[string]bool{
+	config.ProviderOllama: true, config.ProviderOpenAI: true,
+	config.ProviderDeepSeek: true, config.ProviderAnthropic: true,
+}
+
+var cloudProviders = []string{config.ProviderOpenAI, config.ProviderDeepSeek, config.ProviderAnthropic}
 
 var validToneTargets = map[string]bool{
 	"": true, "formal": true, "casual": true, "confident": true,
@@ -180,6 +268,10 @@ var validToneTargets = map[string]bool{
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	keys := map[string]bool{}
+	for _, p := range cloudProviders {
+		keys[p] = secrets.HasAPIKey(p)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -190,7 +282,57 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"provider":       s.cfg.Provider,
 		"listen_host":    s.cfg.ListenHost,
 		"port":           s.cfg.Port,
+		"keys":           keys, // presence booleans only — never values
 	})
+}
+
+// handleSetKey stores a cloud API key in the OS keychain. The key exists
+// only in the request body and the keychain — config, logs, and every
+// response stay clean.
+func (s *Server) handleSetKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		Key      string `json:"key"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if !validProviderTypes[req.Provider] || req.Provider == config.ProviderOllama {
+		writeErr(w, http.StatusBadRequest, "provider must be openai, deepseek, or anthropic")
+		return
+	}
+	key := strings.TrimSpace(req.Key)
+	if len(key) < 8 || len(key) > 500 {
+		writeErr(w, http.StatusBadRequest, "key length looks wrong")
+		return
+	}
+	if err := secrets.SetAPIKey(req.Provider, key); err != nil {
+		writeErr(w, http.StatusInternalServerError, "keychain: "+err.Error())
+		return
+	}
+	s.mu.Lock()
+	s.apiKey = ""
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !validProviderTypes[req.Provider] {
+		writeErr(w, http.StatusBadRequest, "body must be {\"provider\":\"...\"}")
+		return
+	}
+	if err := secrets.DeleteAPIKey(req.Provider); err != nil {
+		writeErr(w, http.StatusInternalServerError, "keychain: "+err.Error())
+		return
+	}
+	s.mu.Lock()
+	s.apiKey = ""
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
@@ -207,12 +349,27 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "too many rules")
 		return
 	}
+	if p.Provider != nil && !validProviderTypes[p.Provider.Type] {
+		writeErr(w, http.StatusBadRequest, "invalid provider type")
+		return
+	}
 	s.mu.Lock()
 	s.cfg.Checks = p.Checks
 	s.cfg.ToneTarget = p.ToneTarget
 	s.cfg.StyleRules = cleanLines(p.StyleRules, 200)
 	s.cfg.DisabledRules = cleanLines(p.DisabledRules, 60)
-	if p.Model != "" {
+	if p.Provider != nil {
+		if s.cfg.Provider.Type != p.Provider.Type {
+			s.apiKey = "" // switching providers invalidates the cached key
+			if p.Provider.Type == config.ProviderOllama {
+				s.cfg.Provider.BaseURL = "http://127.0.0.1:11434"
+			} else {
+				s.cfg.Provider.BaseURL = "" // adapters fill in the default
+			}
+		}
+		s.cfg.Provider.Type = p.Provider.Type
+		s.cfg.Provider.Model = strings.TrimSpace(p.Provider.Model)
+	} else if p.Model != "" {
 		s.cfg.Provider.Model = p.Model
 	}
 	err := s.cfg.Save()
@@ -276,14 +433,19 @@ func (s *Server) handleIgnoreRule(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAddDismissal(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Category string `json:"category"`
-		Original string `json:"original"`
+		Category string  `json:"category"`
+		Original string  `json:"original"`
+		Hours    float64 `json:"hours,omitempty"` // >0 = snooze instead of forever
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Category == "" || req.Original == "" {
 		writeErr(w, http.StatusBadRequest, "body must be {\"category\":\"...\",\"original\":\"...\"}")
 		return
 	}
-	if err := s.memory.AddDismissal(req.Category, req.Original); err != nil {
+	var ttl time.Duration
+	if req.Hours > 0 && req.Hours <= 24*30 {
+		ttl = time.Duration(req.Hours * float64(time.Hour))
+	}
+	if err := s.memory.AddDismissal(req.Category, req.Original, ttl); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
