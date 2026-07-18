@@ -44,9 +44,16 @@ func (o Options) AllowedCategories() map[string]bool {
 	return m
 }
 
+// promptVersion MUST be bumped whenever any prompt template above changes:
+// cached results are keyed on options + segment text only, so without a
+// version, stale results from the old prompts would be served forever.
+const promptVersion = "pv2"
+
 // key serializes the prompt-affecting state for cache keying.
 func (o Options) key() string {
 	var sb strings.Builder
+	sb.WriteString(promptVersion)
+	sb.WriteByte('|')
 	for _, b := range []bool{o.Spelling, o.Grammar, o.Clarity, o.Vocabulary, o.Tone} {
 		if b {
 			sb.WriteByte('1')
@@ -84,10 +91,10 @@ func buildMessages(segText string, opts Options) []provider.Message {
 	sb.WriteString(systemPreamble)
 
 	if opts.Spelling {
-		sb.WriteString("\n- category \"correctness\": spelling mistakes and typos.")
+		sb.WriteString("\n- category \"correctness\": spelling mistakes and typos. Flag misspellings even in informal or slang text (\"whatts\" → \"what's\"), but never flag intentional slang words themselves (\"dawg\", \"gonna\").")
 	}
 	if opts.Grammar {
-		sb.WriteString("\n- category \"correctness\": grammar and punctuation errors — verb agreement, tense, articles, commas, apostrophes.")
+		sb.WriteString("\n- category \"correctness\": grammar and punctuation errors — verb agreement, tense, articles, commas, apostrophes, missing words. Flag dropped verbs and non-standard forms even in casual writing (\"How you doin?\" → \"How are you doing?\").")
 	}
 	if opts.Clarity {
 		sb.WriteString("\n- category \"clarity\": wordiness, redundancy, convoluted phrasing, passive voice where active reads better. The replacement must preserve meaning while being shorter or plainer.")

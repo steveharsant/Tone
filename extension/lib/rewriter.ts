@@ -26,11 +26,6 @@ const STYLE = `
   background: #fff; color: #1a1a1f; border: 1px solid #d9d9e0; border-radius: 10px;
   box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 8px; min-width: 180px; max-width: 380px;
 }
-@media (prefers-color-scheme: dark) {
-  .panel { background: #23232b; color: #ececf1; border-color: #3a3a44; }
-  .menu button:hover { background: #2e2e38; }
-  .preview-text { background: #1a1a20; }
-}
 .menu { display: flex; flex-direction: column; }
 .menu button {
   text-align: left; background: none; border: 0; color: inherit; font: inherit;
@@ -47,6 +42,13 @@ const STYLE = `
 .apply { background: #4f6df5; color: #fff; }
 .cancel { background: transparent; color: inherit; opacity: .7; }
 .err { color: #c73a3a; }
+/* Dark overrides LAST: equal-specificity rules are order-decided, so this
+ * block after the base rules is what makes dark mode actually win. */
+@media (prefers-color-scheme: dark) {
+  .panel { background: #23232b; color: #ececf1; border-color: #3a3a44; }
+  .menu button:hover { background: #2e2e38; }
+  .preview-text { background: #1a1a20; }
+}
 `;
 
 interface Capture {
