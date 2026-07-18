@@ -7,11 +7,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/steveharsant/tone/engine/internal/config"
 	"github.com/steveharsant/tone/engine/internal/ollama"
@@ -63,6 +65,15 @@ func main() {
 			log.Fatalf("install desktop entry: %v", err)
 		}
 		fmt.Println("Desktop entry installed — 'Tone' now appears in your application menu.")
+		return
+	}
+
+	// Single-instance behavior: if an engine already answers on our port,
+	// launching again (e.g. from the application menu) just opens settings.
+	if engineAlreadyRunning(cfg.Port) {
+		url := fmt.Sprintf("http://127.0.0.1:%d/#%s", cfg.Port, cfg.PairingToken)
+		fmt.Printf("Tone engine already running — opening %s\n", url)
+		exec.Command("xdg-open", url).Start()
 		return
 	}
 
@@ -129,6 +140,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+// engineAlreadyRunning reports whether a Tone engine answers on the port.
+// Any HTTP response counts — 401s just mean an authenticated route.
+func engineAlreadyRunning(port int) bool {
+	c := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := c.Get(fmt.Sprintf("http://127.0.0.1:%d/v1/health", port))
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return true
 }
 
 // installDesktopEntry writes an XDG launcher + icon so Tone shows up as a
