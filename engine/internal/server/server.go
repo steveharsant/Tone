@@ -175,6 +175,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/settings", s.auth(s.handleSaveSettings))
 	mux.HandleFunc("POST /api/settings/key", s.auth(s.handleSetKey))
 	mux.HandleFunc("DELETE /api/settings/key", s.auth(s.handleDeleteKey))
+	mux.HandleFunc("POST /api/settings/test", s.auth(s.handleTestProvider))
 
 	// Editorial memory: mute a rule type, remember dismissals, dictionary.
 	mux.HandleFunc("POST /v1/rules/ignore", s.auth(s.handleIgnoreRule))

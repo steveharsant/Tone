@@ -87,6 +87,27 @@
     keyPresence[providerName] = r.ok;
     $('key-status').textContent = r.ok ? 'API key stored in keychain ✓' : 'Failed to store key.';
   };
+  $('provider-test').onclick = async () => {
+    const result = $('provider-test-result');
+    const type = $('provider-select').value;
+    const model = type === 'ollama' ? $('model-select').value : $('cloud-model').value.trim();
+    if (!model) {
+      result.textContent = 'Enter a model name first.';
+      return;
+    }
+    result.textContent = 'Testing…';
+    try {
+      const r = await (await api('/api/settings/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, model }),
+      })).json();
+      result.textContent = r.ok ? `✓ ${type} / ${model} responded.` : `✗ ${r.error}`;
+    } catch (e) {
+      result.textContent = '✗ ' + e.message;
+    }
+  };
+
   $('key-delete').onclick = async () => {
     const providerName = $('provider-select').value;
     await api('/api/settings/key', {

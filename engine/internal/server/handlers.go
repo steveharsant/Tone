@@ -317,6 +317,61 @@ func (s *Server) handleSetKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// handleTestProvider runs a trivial completion against a provider/model —
+// with the key already in the keychain — so users can validate cloud setup
+// before saving. Works for the local provider too.
+func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Type  string `json:"type"`
+		Model string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !validProviderTypes[req.Type] || strings.TrimSpace(req.Model) == "" {
+		writeErr(w, http.StatusBadRequest, "body must be {\"type\":\"...\",\"model\":\"...\"}")
+		return
+	}
+
+	var prov provider.Provider
+	switch req.Type {
+	case config.ProviderOllama:
+		s.mu.RLock()
+		base := strings.TrimSuffix(s.cfg.Provider.BaseURL, "/")
+		s.mu.RUnlock()
+		if base == "" {
+			base = "http://127.0.0.1:11434"
+		}
+		prov = provider.NewOllamaNative(base)
+	default:
+		key, err := secrets.GetAPIKey(req.Type)
+		if err != nil || key == "" {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "no API key stored for " + req.Type})
+			return
+		}
+		switch req.Type {
+		case config.ProviderAnthropic:
+			prov = provider.NewAnthropic("", key)
+		case config.ProviderDeepSeek:
+			prov = provider.NewOpenAICompat("deepseek", "https://api.deepseek.com/v1", key)
+		default:
+			prov = provider.NewOpenAICompat("openai", "https://api.openai.com/v1", key)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	got, err := prov.Complete(ctx, provider.Request{
+		Model:       strings.TrimSpace(req.Model),
+		Messages:    []provider.Message{{Role: "user", Content: "Reply with exactly: OK"}},
+		Temperature: 0,
+		MaxTokens:   8,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	_ = got // any successful completion proves connectivity + auth + model
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Provider string `json:"provider"`
