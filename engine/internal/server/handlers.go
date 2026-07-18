@@ -31,6 +31,9 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 type checkRequest struct {
 	Text       string   `json:"text"`
 	Categories []string `json:"categories,omitempty"`
+	// Stream switches the response to NDJSON priority tiers: one line per
+	// completed pass ({"tier","suggestions"}), then {"done":true}.
+	Stream bool `json:"stream,omitempty"`
 }
 
 type checkResponse struct {
@@ -66,6 +69,20 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
+
+	if req.Stream || r.URL.Query().Get("stream") == "1" {
+		out := newNDJSON(w)
+		err := chk.CheckTiered(r.Context(), req.Text, opts, func(tier string, sugs []check.Suggestion, stats check.Stats) {
+			out.send(map[string]any{"tier": tier, "suggestions": sugs, "stats": stats})
+		})
+		if err != nil && r.Context().Err() == nil {
+			out.send(map[string]any{"error": "provider error: " + err.Error()})
+			return
+		}
+		out.send(map[string]any{"done": true})
+		return
+	}
+
 	sugs, stats, err := chk.Check(r.Context(), req.Text, opts)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "provider error: "+err.Error())
@@ -317,6 +334,9 @@ func (s *Server) handleOllamaInstall(w http.ResponseWriter, r *http.Request) {
 	out.send(map[string]any{"phase": "done"})
 }
 
+// handlePull starts a model download as a detached background job — closing
+// the wizard tab must never abort a multi-GB pull. The wizard polls
+// handlePullStatus for progress.
 func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Model string `json:"model"`
@@ -325,15 +345,46 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "body must be {\"model\":\"tag\"}")
 		return
 	}
-	out := newNDJSON(w)
-	err := s.mgr.Pull(r.Context(), req.Model, func(p ollama.PullProgress) {
-		out.send(map[string]any{"phase": p.Status, "completed": p.Completed, "total": p.Total})
-	})
-	if err != nil {
-		out.send(map[string]any{"error": err.Error()})
+
+	s.pullMu.Lock()
+	defer s.pullMu.Unlock()
+	if s.pull.Active {
+		if s.pull.Model == req.Model {
+			writeJSON(w, http.StatusAccepted, map[string]any{"started": false, "already_running": true})
+			return
+		}
+		writeErr(w, http.StatusConflict, "another model is already downloading: "+s.pull.Model)
 		return
 	}
-	out.send(map[string]any{"phase": "done"})
+	s.pull = pullState{Active: true, Model: req.Model, Phase: "starting"}
+
+	go func(model string) {
+		// Deliberately NOT the request context: the job outlives the tab.
+		err := s.mgr.Pull(context.Background(), model, func(p ollama.PullProgress) {
+			s.pullMu.Lock()
+			s.pull.Phase = p.Status
+			s.pull.Completed = p.Completed
+			s.pull.Total = p.Total
+			s.pullMu.Unlock()
+		})
+		s.pullMu.Lock()
+		s.pull.Active = false
+		if err != nil {
+			s.pull.Phase = "error"
+			s.pull.Error = err.Error()
+		} else {
+			s.pull.Phase = "success"
+		}
+		s.pullMu.Unlock()
+	}(req.Model)
+
+	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
+}
+
+func (s *Server) handlePullStatus(w http.ResponseWriter, r *http.Request) {
+	s.pullMu.Lock()
+	defer s.pullMu.Unlock()
+	writeJSON(w, http.StatusOK, s.pull)
 }
 
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {

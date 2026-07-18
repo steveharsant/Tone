@@ -126,6 +126,62 @@ func (c *Checker) Check(ctx context.Context, text string, opts Options) ([]Sugge
 	return out, stats, nil
 }
 
+// Tier is one priority pass of a tiered check.
+type Tier struct {
+	Name string
+	Opts Options
+}
+
+// TiersFor decomposes enabled checks into priority-ordered passes: spelling
+// first (fastest, most wanted), then grammar, clarity, vocabulary, tone.
+// Each tier is a lean single-purpose prompt, so time-to-first-suggestion
+// beats one combined pass; per-tier cache keys fall out of Options.key().
+func TiersFor(opts Options) []Tier {
+	base := Options{DisabledRules: opts.DisabledRules}
+	var tiers []Tier
+	add := func(name string, mod func(*Options)) {
+		o := base
+		mod(&o)
+		tiers = append(tiers, Tier{Name: name, Opts: o})
+	}
+	if opts.Spelling {
+		add("spelling", func(o *Options) { o.Spelling = true })
+	}
+	if opts.Grammar {
+		add("grammar", func(o *Options) { o.Grammar = true })
+	}
+	if opts.Clarity {
+		add("clarity", func(o *Options) { o.Clarity = true })
+	}
+	if opts.Vocabulary {
+		add("vocabulary", func(o *Options) { o.Vocabulary = true })
+	}
+	if opts.Tone || len(opts.StyleRules) > 0 {
+		add("tone", func(o *Options) {
+			o.Tone = opts.Tone
+			o.ToneTarget = opts.ToneTarget
+			o.StyleRules = opts.StyleRules
+		})
+	}
+	return tiers
+}
+
+// CheckTiered runs the enabled checks as sequential priority passes,
+// emitting each tier's suggestions as soon as that pass completes.
+func (c *Checker) CheckTiered(ctx context.Context, text string, opts Options, emit func(tier string, sugs []Suggestion, stats Stats)) error {
+	for _, t := range TiersFor(opts) {
+		sugs, stats, err := c.Check(ctx, text, t.Opts)
+		if err != nil {
+			return fmt.Errorf("%s pass: %w", t.Name, err)
+		}
+		if sugs == nil {
+			sugs = []Suggestion{}
+		}
+		emit(t.Name, sugs, stats)
+	}
+	return nil
+}
+
 // normalizeRule folds case and dash/space variants so "Subject Verb
 // Agreement" blocks "subject-verb-agreement".
 func normalizeRule(r string) string {

@@ -23,7 +23,76 @@ export default defineBackground(() => {
         return pair();
     }
   });
+
+  // Streaming checks: one port per check; tiers are forwarded as they land.
+  // The port closing (user typed again, tab gone) aborts the engine request,
+  // which cancels the remaining passes server-side.
+  browser.runtime.onConnect.addListener((port) => {
+    if (port.name !== 'tone:check') return;
+    const abort = new AbortController();
+    port.onDisconnect.addListener(() => abort.abort());
+    port.onMessage.addListener((raw: unknown) => {
+      const m = raw as { text?: string };
+      void streamCheck(port, m.text ?? '', abort.signal);
+    });
+  });
 });
+
+async function streamCheck(
+  port: ReturnType<typeof browser.runtime.connect>,
+  text: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const post = (m: unknown) => {
+    try {
+      port.postMessage(m);
+    } catch {
+      /* port already closed */
+    }
+  };
+  const settings = await getSettings();
+  if (!settings.token) {
+    await setBadge('set');
+    post({ error: 'not_paired' });
+    return;
+  }
+  try {
+    const resp = await fetch(engineURL(settings, '/v1/check'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${settings.token}`,
+      },
+      body: JSON.stringify({ text, stream: true }),
+      signal,
+    });
+    if (!resp.ok || !resp.body) {
+      await setBadge(resp.status === 401 ? 'key' : 'err');
+      post({ error: resp.status === 401 ? 'bad_token' : `HTTP ${resp.status}` });
+      return;
+    }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line) post(JSON.parse(line));
+      }
+    }
+    await setBadge('');
+  } catch {
+    if (!signal.aborted) {
+      await setBadge('off');
+      post({ error: 'engine_unreachable', disconnected: true });
+    }
+  }
+}
 
 async function getSettings(): Promise<ToneSettings> {
   const stored = await browser.storage.local.get({ ...DEFAULT_SETTINGS });

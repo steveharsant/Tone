@@ -59,6 +59,8 @@ export class Popover {
 
     this.pop.addEventListener('mouseenter', () => this.cancelHide());
     this.pop.addEventListener('mouseleave', () => this.scheduleHide());
+    // Wobble tolerance: re-entering the popover's neighborhood keeps it up.
+    this.pop.addEventListener('mousemove', () => this.cancelHide());
     document.addEventListener('scroll', () => this.hide(), { capture: true, passive: true });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') this.hide();
@@ -123,9 +125,23 @@ export class Popover {
     this.pop.style.top = `${top}px`;
   }
 
-  scheduleHide(delay = 250): void {
-    this.cancelHide();
+  /**
+   * Grace period before hiding — generous on purpose: losing the popover to
+   * a 2px mouse wobble means the user has to re-hover and wait again.
+   */
+  scheduleHide(delay = 700): void {
+    if (this.hideTimer !== undefined) return; // already counting down
     this.hideTimer = window.setTimeout(() => this.hide(), delay);
+  }
+
+  /**
+   * True when (x, y) is inside the popover or its surrounding grace margin —
+   * the corridor between underline and popover counts as "still interested".
+   */
+  containsPoint(x: number, y: number, pad = 56): boolean {
+    if (this.pop.style.display === 'none') return false;
+    const r = this.pop.getBoundingClientRect();
+    return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
   }
 
   cancelHide(): void {

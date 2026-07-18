@@ -12,7 +12,10 @@
 import { browser } from 'wxt/browser';
 import { measureSpans, toViewport, isVisibleIn, type FormField, type RelativeRect } from './mirror';
 import { buildTextMap, rangeFromSpan, type TextMap } from './textmap';
-import { CATEGORY_COLORS, type CheckResult, type Suggestion } from './types';
+import { CATEGORY_COLORS, type CheckStreamMessage, type Suggestion } from './types';
+
+/** A suggestion tagged with the priority tier that produced it. */
+type TieredSuggestion = Suggestion & { tier?: string };
 
 const DEBOUNCE_MS = 700;
 const MIN_TEXT_LENGTH = 8;
@@ -39,12 +42,13 @@ export class FieldSession {
   readonly el: HTMLElement;
   readonly kind: EditableKind;
 
-  private suggestions: Suggestion[] = [];
+  private suggestions: TieredSuggestion[] = [];
   private dismissed = new Set<string>();
   private lastCheckedText = '';
   /** The text the current suggestion spans refer to (kept in sync on edits). */
   private renderedText = '';
   private debounceTimer: number | undefined;
+  private checkPort: ReturnType<typeof browser.runtime.connect> | null = null;
   private ceRendered: CERendered[] = [];
   private formRendered: FormRendered[] = [];
   private overlay: HTMLElement | null = null;
@@ -149,19 +153,74 @@ export class FieldSession {
       return;
     }
 
-    let res: CheckResult;
+    // One in-flight check at a time; superseding it aborts the old one all
+    // the way down to the model.
+    this.abortCheck();
+    let port: ReturnType<typeof browser.runtime.connect>;
     try {
-      res = (await browser.runtime.sendMessage({ type: 'tone:check', text })) as CheckResult;
+      port = browser.runtime.connect({ name: 'tone:check' });
     } catch {
-      return; // extension context invalidated or background asleep — retry on next input
+      return; // extension context invalidated — retry on next input
     }
-    if (!res?.ok) return; // engine down / unpaired: background handles the badge
+    this.checkPort = port;
 
-    // Discard stale results: the user kept typing while we were checking.
-    if (this.getText() !== text) return;
-    this.lastCheckedText = text;
-    this.renderedText = text;
-    this.suggestions = res.suggestions.filter((s) => !this.dismissed.has(keyOf(s)));
+    // Tiers arrive in priority order: spelling lands first and renders
+    // immediately; later passes merge in without disturbing earlier ones.
+    port.onMessage.addListener((raw: unknown) => {
+      const msg = raw as CheckStreamMessage;
+      if ('error' in msg) {
+        this.finishCheck(port);
+        return;
+      }
+      if ('done' in msg) {
+        this.lastCheckedText = text;
+        this.finishCheck(port);
+        return;
+      }
+      if (this.getText() !== text) {
+        this.finishCheck(port); // stale: user typed while checking
+        return;
+      }
+      this.mergeTier(msg.tier, msg.suggestions, text);
+    });
+    port.onDisconnect.addListener(() => {
+      if (this.checkPort === port) this.checkPort = null;
+    });
+    port.postMessage({ text });
+  }
+
+  private abortCheck(): void {
+    if (this.checkPort) {
+      try {
+        this.checkPort.disconnect();
+      } catch {
+        /* already gone */
+      }
+      this.checkPort = null;
+    }
+  }
+
+  private finishCheck(port: ReturnType<typeof browser.runtime.connect>): void {
+    if (this.checkPort === port) {
+      try {
+        port.disconnect();
+      } catch {
+        /* already gone */
+      }
+      this.checkPort = null;
+    }
+  }
+
+  /** Replaces this tier's previous suggestions; keeps other tiers intact. */
+  private mergeTier(tier: string, incoming: Suggestion[], checkText: string): void {
+    const kept = this.suggestions.filter((s) => s.tier !== tier);
+    const overlapsKept = (s: Suggestion) =>
+      kept.some((k) => s.span.start < k.span.end && s.span.end > k.span.start);
+    const fresh: TieredSuggestion[] = incoming
+      .filter((s) => !this.dismissed.has(keyOf(s)) && !overlapsKept(s))
+      .map((s) => ({ ...s, tier }));
+    this.suggestions = [...kept, ...fresh].sort((a, b) => a.span.start - b.span.start);
+    this.renderedText = checkText;
     this.render();
   }
 
@@ -317,9 +376,13 @@ export class FieldSession {
   }
 }
 
-/** Dismissals should survive re-checks, whose suggestions get fresh ids. */
+/**
+ * Dismissals must survive re-checks. Keyed by category+original only: model
+ * rewrites (especially clarity) vary their replacement wording run to run,
+ * and a dismissed issue must not resurface with a new phrasing.
+ */
 function keyOf(s: Suggestion): string {
-  return `${s.category} ${s.original} ${s.replacement}`;
+  return `${s.category} ${s.original}`;
 }
 
 interface Edit {

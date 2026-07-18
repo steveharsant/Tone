@@ -68,7 +68,12 @@ export default defineContentScript({
             return;
           }
         }
-        if (popover.activeSuggestion) popover.scheduleHide();
+        if (popover.activeSuggestion) {
+          // Sticky popover: as long as the pointer is in or near it (or on
+          // its way there), keep it up; otherwise hide after a grace period.
+          if (popover.containsPoint(e.clientX, e.clientY)) popover.cancelHide();
+          else popover.scheduleHide();
+        }
       },
       { passive: true },
     );

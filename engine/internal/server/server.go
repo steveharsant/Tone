@@ -34,6 +34,20 @@ type Server struct {
 	mgr      *ollama.Manager
 	cache    *check.Cache
 	pairings *pairing.Store
+
+	pullMu sync.Mutex
+	pull   pullState
+}
+
+// pullState tracks the single in-flight model download (a background job so
+// the wizard tab can come and go).
+type pullState struct {
+	Active    bool   `json:"active"`
+	Model     string `json:"model,omitempty"`
+	Phase     string `json:"phase,omitempty"`
+	Completed int64  `json:"completed"`
+	Total     int64  `json:"total"`
+	Error     string `json:"error,omitempty"`
 }
 
 func New(version string, cfg *config.Config, mgr *ollama.Manager) *Server {
@@ -90,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/setup/status", s.auth(s.handleSetupStatus))
 	mux.HandleFunc("POST /api/setup/ollama/install", s.auth(s.handleOllamaInstall))
 	mux.HandleFunc("POST /api/setup/pull", s.auth(s.handlePull))
+	mux.HandleFunc("GET /api/setup/pull/status", s.auth(s.handlePullStatus))
 	mux.HandleFunc("POST /api/setup/complete", s.auth(s.handleSetupComplete))
 	mux.HandleFunc("GET /api/settings", s.auth(s.handleGetSettings))
 	mux.HandleFunc("POST /api/settings", s.auth(s.handleSaveSettings))

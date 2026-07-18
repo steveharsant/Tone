@@ -129,6 +129,25 @@
     }
   };
 
+  /* The pull is a background job on the engine: navigating away never
+   * cancels it. This page just polls for progress (and resumes the display
+   * if you come back mid-download). */
+  async function pollPullUntilDone() {
+    for (;;) {
+      const st = await (await api('/api/setup/pull/status')).json();
+      if (st.phase === 'error') throw new Error(st.error || 'download failed');
+      if (st.total > 0) {
+        $('pull-bar').value = pct(st.completed, st.total);
+        $('pull-progress-text').textContent =
+          `${st.phase || 'downloading'}… ${gb(st.completed)} / ${gb(st.total)} — safe to close this page`;
+      } else {
+        $('pull-progress-text').textContent = st.phase || '…';
+      }
+      if (!st.active && st.phase === 'success') return st.model;
+      await new Promise((r) => setTimeout(r, 700));
+    }
+  }
+
   $('model-continue').onclick = async () => {
     const m = state.selected;
     if (!m) return;
@@ -146,16 +165,8 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: m.tag }),
       });
-      await stream(resp, (ev) => {
-        if (ev.error) throw new Error(ev.error);
-        if (ev.total > 0) {
-          $('pull-bar').value = pct(ev.completed, ev.total);
-          $('pull-progress-text').textContent =
-            `${ev.phase || 'downloading'}… ${gb(ev.completed)} / ${gb(ev.total)}`;
-        } else {
-          $('pull-progress-text').textContent = ev.phase || '…';
-        }
-      });
+      if (!resp.ok) throw new Error((await resp.json()).error || 'could not start download');
+      await pollPullUntilDone();
       const done = await api('/api/setup/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -177,4 +188,22 @@
     $('ollama-status').innerHTML =
       '<span class="status-dot dot-err"></span>Cannot reach engine: ' + e.message;
   });
+
+  /* Resume progress display if a download is already running. */
+  api('/api/setup/pull/status')
+    .then((r) => r.json())
+    .then((st) => {
+      if (st.active) {
+        $('pull-progress').classList.remove('hidden');
+        $('model-continue').disabled = true;
+        pollPullUntilDone()
+          .then(() => refresh())
+          .catch((e) => {
+            $('pull-error').textContent = String(e.message || e);
+            $('pull-error').classList.remove('hidden');
+          })
+          .finally(() => ($('model-continue').disabled = false));
+      }
+    })
+    .catch(() => {});
 })();

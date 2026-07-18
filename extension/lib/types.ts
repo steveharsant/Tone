@@ -38,6 +38,16 @@ export type CheckResult =
   | { ok: true; suggestions: Suggestion[] }
   | { ok: false; error: string; disconnected?: boolean };
 
+/**
+ * One message on a `tone:check` streaming port. Tiers arrive in priority
+ * order (spelling → grammar → clarity → vocabulary → tone), each as soon as
+ * its pass completes.
+ */
+export type CheckStreamMessage =
+  | { tier: string; suggestions: Suggestion[] }
+  | { done: true }
+  | { error: string; disconnected?: boolean };
+
 export type HealthResult =
   | { ok: true; status: string; model?: string }
   | { ok: false; error: string; disconnected?: boolean };
