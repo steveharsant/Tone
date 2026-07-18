@@ -228,7 +228,7 @@ func installDesktopEntry() error {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(iconPath, tray.Icon(), 0o644); err != nil {
+	if err := os.WriteFile(iconPath, tray.AppIcon(), 0o644); err != nil {
 		return err
 	}
 

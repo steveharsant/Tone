@@ -17,8 +17,9 @@ body {
   display: flex; justify-content: center; padding: 40px 16px;
 }
 main { width: 100%; max-width: 640px; }
-h1 { font-size: 22px; margin: 0 0 4px; }
+h1 { font-size: 22px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
 h1 .logo { color: var(--accent); }
+h1 .logo-img { width: 32px; height: 32px; border-radius: 7px; }
 p.sub { color: var(--muted); margin: 0 0 24px; }
 .card {
   background: var(--panel); border: 1px solid var(--border);

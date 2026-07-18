@@ -15,8 +15,10 @@ CGO_ENABLED=0 GOARCH=$ARCH go build -trimpath -ldflags='-s -w' -o "$STAGE/usr/bi
   CGO_ENABLED=0 GOARCH=$ARCH go build -trimpath -ldflags='-s -w' -o "$STAGE/usr/bin/tone" ./cmd/tone
 }
 
-mkdir -p "$STAGE/DEBIAN" "$STAGE/usr/share/applications" "$STAGE/usr/share/icons/hicolor/32x32/apps"
+mkdir -p "$STAGE/DEBIAN" "$STAGE/usr/share/applications" \
+  "$STAGE/usr/share/icons/hicolor/32x32/apps" "$STAGE/usr/share/icons/hicolor/128x128/apps"
 cp internal/tray/icon.png "$STAGE/usr/share/icons/hicolor/32x32/apps/tone.png"
+cp internal/tray/appicon.png "$STAGE/usr/share/icons/hicolor/128x128/apps/tone.png"
 
 cat > "$STAGE/usr/share/applications/tone.desktop" <<EOF
 [Desktop Entry]

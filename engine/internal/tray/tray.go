@@ -16,8 +16,15 @@ import (
 //go:embed icon.png
 var icon []byte
 
-// Icon returns the embedded tray/app icon PNG (used for the desktop entry).
+//go:embed appicon.png
+var appIcon []byte
+
+// Icon returns the small tray icon PNG (32px).
 func Icon() []byte { return icon }
+
+// AppIcon returns the larger application icon PNG (128px) used for the
+// desktop entry and packaging.
+func AppIcon() []byte { return appIcon }
 
 type Options struct {
 	SettingsURL string

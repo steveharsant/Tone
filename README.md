@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="tone_logo.png" width="160" alt="Tone logo">
+</p>
+
 # Tone
 
 Local AI spellcheck and grammar, à la Grammarly — nothing leaves your machine.
