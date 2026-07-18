@@ -22,17 +22,17 @@ import (
 	"github.com/steveharsant/tone/engine/internal/tray"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	var (
-		cfgPath        = flag.String("config", "", "path to config.json (default: $XDG_CONFIG_HOME/tone/config.json)")
-		port           = flag.Int("port", 0, "override listen port")
-		listen         = flag.String("listen", "", "bind host (default 127.0.0.1). Anything else exposes the engine to your network — token auth still applies, but only do this on a trusted network. Persisted to config.")
-		noAutostart    = flag.Bool("no-autostart", false, "do not auto-start a managed Ollama on launch")
-		noTray         = flag.Bool("no-tray", false, "run headless without the system-tray icon")
-		open           = flag.Bool("open", false, "open the settings page in your browser on start")
-		installDesktop = flag.Bool("install-desktop", false, "install a desktop entry (application menu launcher) and exit")
+		cfgPath          = flag.String("config", "", "path to config.json (default: $XDG_CONFIG_HOME/tone/config.json)")
+		port             = flag.Int("port", 0, "override listen port")
+		listen           = flag.String("listen", "", "bind host (default 127.0.0.1). Anything else exposes the engine to your network — token auth still applies, but only do this on a trusted network. Persisted to config.")
+		noAutostart      = flag.Bool("no-autostart", false, "do not auto-start a managed Ollama on launch")
+		noTray           = flag.Bool("no-tray", false, "run headless without the system-tray icon")
+		open             = flag.Bool("open", false, "open the settings page in your browser on start")
+		installDesktop   = flag.Bool("install-desktop", false, "install a desktop entry (application menu launcher) and exit")
 		installAutostart = flag.Bool("install-autostart", false, "install and enable a systemd user service so the engine starts at login, then exit")
 	)
 	flag.Parse()

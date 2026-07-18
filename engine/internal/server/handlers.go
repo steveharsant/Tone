@@ -241,12 +241,15 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 
 // --- settings API ------------------------------------------------------
 
+// settingsPayload is a PATCH-style payload: every field is optional and only
+// present fields are applied, so a provider-only save can never wipe the
+// check toggles or style rules.
 type settingsPayload struct {
-	Checks        config.Checks `json:"checks"`
-	ToneTarget    string        `json:"tone_target"`
-	StyleRules    []string      `json:"style_rules"`
-	DisabledRules []string      `json:"disabled_rules"`
-	Model         string        `json:"model,omitempty"`
+	Checks        *config.Checks `json:"checks,omitempty"`
+	ToneTarget    *string        `json:"tone_target,omitempty"`
+	StyleRules    []string       `json:"style_rules,omitempty"`    // nil = untouched, [] = clear
+	DisabledRules []string       `json:"disabled_rules,omitempty"` // nil = untouched, [] = clear
+	Model         string         `json:"model,omitempty"`
 	// Provider switches the LLM backend. The API key is NOT part of this
 	// payload — it goes through /api/settings/key into the OS keychain.
 	Provider *struct {
@@ -396,7 +399,7 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
-	if !validToneTargets[p.ToneTarget] {
+	if p.ToneTarget != nil && !validToneTargets[*p.ToneTarget] {
 		writeErr(w, http.StatusBadRequest, "invalid tone_target")
 		return
 	}
@@ -409,10 +412,18 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	s.cfg.Checks = p.Checks
-	s.cfg.ToneTarget = p.ToneTarget
-	s.cfg.StyleRules = cleanLines(p.StyleRules, 200)
-	s.cfg.DisabledRules = cleanLines(p.DisabledRules, 60)
+	if p.Checks != nil {
+		s.cfg.Checks = *p.Checks
+	}
+	if p.ToneTarget != nil {
+		s.cfg.ToneTarget = *p.ToneTarget
+	}
+	if p.StyleRules != nil {
+		s.cfg.StyleRules = cleanLines(p.StyleRules, 200)
+	}
+	if p.DisabledRules != nil {
+		s.cfg.DisabledRules = cleanLines(p.DisabledRules, 60)
+	}
 	if p.Provider != nil {
 		if s.cfg.Provider.Type != p.Provider.Type {
 			s.apiKey = "" // switching providers invalidates the cached key

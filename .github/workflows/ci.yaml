@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, phase-2-providers]
+  pull_request:
+
+jobs:
+  engine:
+    name: Engine (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build ./cmd/tone
+
+  extension:
+    name: Extension (TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: npm run build:firefox

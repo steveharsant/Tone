@@ -96,6 +96,12 @@ export class Rewriter {
       if (this.root.dataset.mode === 'button') this.hide();
       return;
     }
+    // Contenteditable replacements across block boundaries would flatten the
+    // paragraphs — keep the offer to single-block selections there.
+    if (session.kind === 'ce' && span.text.includes('\n')) {
+      if (this.root.dataset.mode === 'button') this.hide();
+      return;
+    }
     this.captured = { session, start: span.start, end: span.end, text: span.text };
     const rect = session.selectionRect(span);
     if (!rect) return;

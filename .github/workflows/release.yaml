@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Build .deb
+        working-directory: engine
+        run: ./hack/package.sh
+
+      - name: Build extension zips
+        working-directory: extension
+        run: |
+          npm ci
+          npm run zip
+          npx wxt zip -b firefox
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Tone ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            engine/dist/*.deb \
+            extension/.output/*-chrome.zip \
+            extension/.output/*-firefox.zip

@@ -301,3 +301,47 @@ func TestIgnoreRuleEndpoint(t *testing.T) {
 		t.Fatalf("ignored rule still flagged: %d", len(out.Suggestions))
 	}
 }
+
+func TestPartialSettingsSaveLeavesOthersUntouched(t *testing.T) {
+	ts, token := testServer(t)
+	do := func(body string) {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/settings", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("save = %d", resp.StatusCode)
+		}
+	}
+	// Establish style rules + checks, then send a provider-only patch.
+	do(`{"checks":{"spelling":true,"grammar":true,"clarity":true},"tone_target":"formal","style_rules":["No contractions"],"disabled_rules":["wordiness"]}`)
+	do(`{"provider":{"type":"ollama","model":"other-model"}}`)
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/settings", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Checks     struct{ Spelling, Clarity bool } `json:"checks"`
+		ToneTarget string                           `json:"tone_target"`
+		StyleRules []string                         `json:"style_rules"`
+		Provider   struct{ Model string }           `json:"provider"`
+	}
+	json.NewDecoder(resp.Body).Decode(&out)
+	if !out.Checks.Spelling || !out.Checks.Clarity {
+		t.Errorf("provider-only patch wiped checks: %+v", out.Checks)
+	}
+	if out.ToneTarget != "formal" || len(out.StyleRules) != 1 {
+		t.Errorf("provider-only patch wiped tone/style: %q %v", out.ToneTarget, out.StyleRules)
+	}
+	if out.Provider.Model != "other-model" {
+		t.Errorf("provider patch not applied: %q", out.Provider.Model)
+	}
+}

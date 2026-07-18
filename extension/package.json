@@ -2,7 +2,7 @@
   "name": "tone-extension",
   "description": "Browser extension for Tone, the local AI writing assistant",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",

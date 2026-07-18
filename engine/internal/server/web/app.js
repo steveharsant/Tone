@@ -102,7 +102,19 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, model }),
       })).json();
-      result.textContent = r.ok ? `✓ ${type} / ${model} responded.` : `✗ ${r.error}`;
+      if (r.ok) {
+        // A working provider is what the user wants active — apply it so a
+        // successful Test can't silently leave the old provider in charge.
+        await api('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: { type, model } }),
+        });
+        result.textContent = `✓ ${type} / ${model} responded — now the active provider.`;
+        loadHealth();
+      } else {
+        result.textContent = `✗ ${r.error}`;
+      }
     } catch (e) {
       result.textContent = '✗ ' + e.message;
     }

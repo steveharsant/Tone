@@ -223,15 +223,29 @@ export class FieldSession {
     }
   }
 
-  /** Replaces this tier's previous suggestions; keeps other tiers intact. */
+  /**
+   * Replaces this tier's previous suggestions and re-resolves overlaps by
+   * TIER PRIORITY, not arrival order — tiers run in parallel, so a clarity
+   * rewrite may land before the spelling fix hidden inside its span; the
+   * spelling fix must still win when it arrives.
+   */
   private mergeTier(tier: string, incoming: Suggestion[], checkText: string): void {
     const kept = this.suggestions.filter((s) => s.tier !== tier);
-    const overlapsKept = (s: Suggestion) =>
-      kept.some((k) => s.span.start < k.span.end && s.span.end > k.span.start);
     const fresh: TieredSuggestion[] = incoming
-      .filter((s) => !this.dismissed.has(keyOf(s)) && !overlapsKept(s))
+      .filter((s) => !this.dismissed.has(keyOf(s)))
       .map((s) => ({ ...s, tier }));
-    this.suggestions = [...kept, ...fresh].sort((a, b) => a.span.start - b.span.start);
+
+    const candidates = [...kept, ...fresh].sort((a, b) => {
+      const p = tierPriority(a.tier) - tierPriority(b.tier);
+      return p !== 0 ? p : a.span.start - b.span.start;
+    });
+    const winners: TieredSuggestion[] = [];
+    for (const c of candidates) {
+      if (!winners.some((wn) => c.span.start < wn.span.end && c.span.end > wn.span.start)) {
+        winners.push(c);
+      }
+    }
+    this.suggestions = winners.sort((a, b) => a.span.start - b.span.start);
     this.renderedText = checkText;
     this.render();
   }
@@ -472,6 +486,13 @@ export class FieldSession {
 /** Mirrors the engine's rule normalization (case + dash/space folding). */
 function normalizeRule(rule: string): string {
   return rule.trim().toLowerCase().replace(/[ _]/g, '-');
+}
+
+const TIER_ORDER = ['spelling', 'grammar', 'clarity', 'vocabulary', 'tone'];
+
+function tierPriority(tier: string | undefined): number {
+  const i = TIER_ORDER.indexOf(tier ?? '');
+  return i === -1 ? TIER_ORDER.length : i;
 }
 
 /**
