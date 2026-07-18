@@ -76,6 +76,86 @@ export default defineContentScript({
       onSnooze: (s: Suggestion) => popoverOwner?.snooze(s, 24),
     });
 
+    // --- keyboard review: Alt+↓/↑ step through suggestions, Alt+Enter
+    // accepts, Alt+X dismisses — each action auto-advances. Alt-combos are
+    // used because plain keys must keep typing text.
+    const reviewTarget = (): FieldSession | null => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) {
+        for (const s of sessions) {
+          if (s.el === active || s.el.contains(active)) return s;
+        }
+      }
+      for (const s of sessions) {
+        if (s.getSuggestions().length > 0) return s;
+      }
+      return null;
+    };
+    const reviewMove = (delta: number): void => {
+      const session = reviewTarget();
+      if (!session) return;
+      const sugs = session.getSuggestions();
+      if (sugs.length === 0) {
+        popover.hide();
+        return;
+      }
+      const curId = popover.activeSuggestion?.id;
+      let ix = sugs.findIndex((s) => s.id === curId);
+      ix = ix === -1 ? (delta > 0 ? 0 : sugs.length - 1) : (ix + delta + sugs.length) % sugs.length;
+      const s = sugs[ix];
+      let rect = session.rectFor(s);
+      if (!rect) return;
+      if (rect.top < 40 || rect.bottom > window.innerHeight - 40) {
+        window.scrollBy({ top: rect.top - window.innerHeight / 2 });
+        rect = session.rectFor(s) ?? rect;
+      }
+      popoverOwner = session;
+      popover.show(rect, s);
+      popover.cancelHide();
+    };
+    document.addEventListener(
+      'keydown',
+      (e) => {
+        if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        const handle = (fn: () => void) => {
+          e.preventDefault();
+          e.stopPropagation();
+          fn();
+        };
+        const current = popover.activeSuggestion;
+        switch (e.key) {
+          case 'ArrowDown':
+            handle(() => reviewMove(1));
+            break;
+          case 'ArrowUp':
+            handle(() => reviewMove(-1));
+            break;
+          case 'Enter':
+            if (current && popoverOwner) {
+              const owner = popoverOwner;
+              handle(() => {
+                owner.accept(current);
+                popover.hide();
+                window.setTimeout(() => reviewMove(1), 250);
+              });
+            }
+            break;
+          case 'x':
+          case 'X':
+            if (current && popoverOwner) {
+              const owner = popoverOwner;
+              handle(() => {
+                owner.dismiss(current);
+                popover.hide();
+                window.setTimeout(() => reviewMove(1), 100);
+              });
+            }
+            break;
+        }
+      },
+      true,
+    );
+
     // Selection rewrites: "✦ Rewrite" button on selections in tracked fields.
     new Rewriter((target) => {
       if (target instanceof HTMLElement) {

@@ -47,6 +47,7 @@ button { font: inherit; border-radius: 7px; padding: 5px 14px; cursor: pointer; 
 .more button { background: none; padding: 0; font-size: 12px; color: inherit;
   opacity: .6; text-decoration: underline; text-underline-offset: 2px; }
 .more button:hover { opacity: 1; }
+.keys { margin-top: 8px; font-size: 10.5px; opacity: .4; user-select: none; }
 `;
 
 export class Popover {
@@ -158,6 +159,9 @@ export class Popover {
 
     this.pop.append(cat, repl, expl, row);
     if (more.childElementCount > 0) this.pop.append(more);
+    const keys = el('div', 'keys');
+    keys.textContent = 'Alt+↓/↑ review · Alt+↵ accept · Alt+X dismiss';
+    this.pop.append(keys);
     this.pop.style.display = 'block';
 
     // Position below the underline; flip above if it would overflow.

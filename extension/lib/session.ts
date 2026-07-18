@@ -438,6 +438,23 @@ export class FieldSession {
     return r.width || r.height ? r : null;
   }
 
+  /** Current suggestions in document order (for keyboard review). */
+  getSuggestions(): Suggestion[] {
+    return [...this.suggestions];
+  }
+
+  /** Viewport rect of a rendered suggestion (anchor for keyboard review). */
+  rectFor(s: Suggestion): DOMRect | null {
+    if (this.kind === 'ce') {
+      const r = this.ceRendered.find((x) => x.suggestion.id === s.id);
+      const rect = r?.range.getBoundingClientRect();
+      return rect && (rect.width || rect.height) ? rect : null;
+    }
+    const fr = this.formRendered.find((x) => x.suggestion.id === s.id);
+    if (!fr || fr.rects.length === 0) return null;
+    return toViewport(this.el as FormField, fr.rects[0]);
+  }
+
   snooze(s: Suggestion, hours: number): void {
     this.dismissedLocallyOnly(s);
     void browser.runtime
