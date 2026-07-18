@@ -184,3 +184,16 @@ func TestSetupPagesServeWithoutToken(t *testing.T) {
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
+
+func TestQueryStringTokenRejected(t *testing.T) {
+	ts, token := testServer(t)
+	// Tokens in URLs leak into proxy logs; only the Authorization header works.
+	resp, err := http.Get(ts.URL + "/v1/health?token=" + token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("query-string token accepted: %d, want 401", resp.StatusCode)
+	}
+}

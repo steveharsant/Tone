@@ -11,8 +11,11 @@
   $('pairing-token').textContent = token;
   $('rerun-setup').href = '/setup#' + token;
 
+  /* Token travels in the Authorization header only — query strings end up
+   * in proxy/access logs. (The #fragment in the page URL never leaves the
+   * browser, so bookmarking the tokened link stays safe.) */
   const api = (path, opts = {}) =>
-    fetch(path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token), opts);
+    fetch(path, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + token } });
 
   async function loadHealth() {
     try {

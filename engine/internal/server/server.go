@@ -177,9 +177,11 @@ func isLoopback(host string) bool {
 	return false
 }
 
-// auth enforces the pairing token: Authorization: Bearer <token> (extension)
-// or ?token= (the embedded pages, which read it from the URL fragment the
-// engine prints at startup).
+// auth enforces the pairing token via the Authorization header ONLY.
+// Query-string tokens are deliberately not accepted: URLs get written into
+// reverse-proxy and access logs, which would leak the token the moment the
+// engine sits behind any proxy. The embedded pages carry the token in the
+// URL #fragment (never sent over the wire) and attach it as a header.
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.mu.RLock()
@@ -187,8 +189,8 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		s.mu.RUnlock()
 
 		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if got == "" || got == r.Header.Get("Authorization") {
-			got = r.URL.Query().Get("token")
+		if got == r.Header.Get("Authorization") {
+			got = "" // no Bearer prefix → no token
 		}
 		if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
 			w.Header().Set("Content-Type", "application/json")

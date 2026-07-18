@@ -13,8 +13,10 @@
   $('to-settings').href = '/#' + token;
   $('footer-settings').href = '/#' + token;
 
+  /* Token travels in the Authorization header only — query strings end up
+   * in proxy/access logs. */
   const api = (path, opts = {}) =>
-    fetch(path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token), opts);
+    fetch(path, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + token } });
 
   const gb = (n) => (n / 1e9).toFixed(1) + ' GB';
   const pct = (done, total) => (total > 0 ? Math.round((100 * done) / total) : 0);
