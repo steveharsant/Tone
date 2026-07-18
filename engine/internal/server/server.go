@@ -82,7 +82,9 @@ func (s *Server) checker() (*check.Checker, error) {
 	var prov provider.Provider
 	switch p.Type {
 	case config.ProviderOllama:
-		prov = provider.NewOpenAICompat("ollama", strings.TrimSuffix(p.BaseURL, "/")+"/v1", "")
+		// Native API, not OpenAI-compat: only /api/chat accepts think:false,
+		// which hybrid reasoning models (qwen3) need to answer promptly.
+		prov = provider.NewOllamaNative(strings.TrimSuffix(p.BaseURL, "/"))
 	default:
 		// Cloud providers land in Phase 2 alongside keychain storage.
 		return nil, fmt.Errorf("provider %q is not available yet", p.Type)

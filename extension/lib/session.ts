@@ -53,11 +53,18 @@ export class FieldSession {
   private formRendered: FormRendered[] = [];
   private overlay: HTMLElement | null = null;
   private onRerender: () => void;
+  private onState: (state: 'checking' | 'done' | 'error', detail?: string) => void;
 
-  constructor(el: HTMLElement, kind: EditableKind, onRerender: () => void) {
+  constructor(
+    el: HTMLElement,
+    kind: EditableKind,
+    onRerender: () => void,
+    onState: (state: 'checking' | 'done' | 'error', detail?: string) => void = () => {},
+  ) {
     this.el = el;
     this.kind = kind;
     this.onRerender = onRerender;
+    this.onState = onState;
 
     el.addEventListener('input', this.handleInput);
     el.addEventListener('blur', this.handleBlur);
@@ -163,17 +170,21 @@ export class FieldSession {
       return; // extension context invalidated — retry on next input
     }
     this.checkPort = port;
+    this.onState('checking');
 
     // Tiers arrive in priority order: spelling lands first and renders
     // immediately; later passes merge in without disturbing earlier ones.
     port.onMessage.addListener((raw: unknown) => {
       const msg = raw as CheckStreamMessage;
       if ('error' in msg) {
+        this.onState('error', msg.disconnected ? 'Engine offline' : 'Check failed');
         this.finishCheck(port);
         return;
       }
       if ('done' in msg) {
         this.lastCheckedText = text;
+        const n = this.suggestions.length;
+        this.onState('done', n === 0 ? 'Looks good' : `${n} suggestion${n === 1 ? '' : 's'}`);
         this.finishCheck(port);
         return;
       }

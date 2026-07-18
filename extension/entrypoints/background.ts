@@ -211,7 +211,7 @@ async function siteStatus(url: string | undefined): Promise<SiteStatus> {
       /* non-URL sender (extension pages) stays enabled */
     }
   }
-  return { enabled, paired: settings.token !== '' };
+  return { enabled, paired: settings.token !== '', showIndicator: settings.showIndicator !== false };
 }
 
 /** Badge doubles as the "engine not connected" indicator. */

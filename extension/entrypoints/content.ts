@@ -5,6 +5,7 @@
 
 import { defineContentScript } from '#imports';
 import { browser } from 'wxt/browser';
+import { StatusIndicator } from '@/lib/indicator';
 import { Popover } from '@/lib/popover';
 import { FieldSession, type EditableKind } from '@/lib/session';
 import { CATEGORY_COLORS, type SiteStatus, type Suggestion } from '@/lib/types';
@@ -21,6 +22,22 @@ export default defineContentScript({
     if (!status?.enabled) return;
 
     injectHighlightStyles();
+
+    // Lazy: the pill only enters the DOM once an editable is focused, so
+    // pages the user never types on stay untouched.
+    let indicator: StatusIndicator | null = null;
+    let indicatorEnabled = status.showIndicator;
+    const onState: ConstructorParameters<typeof FieldSession>[3] = (state, detail) => {
+      indicator ??= new StatusIndicator();
+      indicator.setEnabled(indicatorEnabled);
+      indicator.set(state, detail);
+    };
+    browser.storage.onChanged.addListener((changes) => {
+      if ('showIndicator' in changes) {
+        indicatorEnabled = changes.showIndicator.newValue !== false;
+        indicator?.setEnabled(indicatorEnabled);
+      }
+    });
 
     const sessions = new Set<FieldSession>();
     const sessionByEl = new WeakMap<HTMLElement, FieldSession>();
@@ -87,7 +104,7 @@ export default defineContentScript({
         const [el, kind] = resolved;
         let session = sessionByEl.get(el);
         if (!session) {
-          session = new FieldSession(el, kind, rebuildHighlights);
+          session = new FieldSession(el, kind, rebuildHighlights, onState);
           sessionByEl.set(el, session);
           sessions.add(session);
         }

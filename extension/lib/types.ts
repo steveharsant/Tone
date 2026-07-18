@@ -55,6 +55,7 @@ export type HealthResult =
 export interface SiteStatus {
   enabled: boolean;
   paired: boolean;
+  showIndicator: boolean;
 }
 
 export interface ToneSettings {
@@ -64,6 +65,8 @@ export interface ToneSettings {
   port: number;
   token: string;
   disabledSites: string[];
+  /** Show the bottom-right status pill on pages. */
+  showIndicator: boolean;
 }
 
 export const DEFAULT_SETTINGS: ToneSettings = {
@@ -72,6 +75,7 @@ export const DEFAULT_SETTINGS: ToneSettings = {
   port: 8765,
   token: '',
   disabledSites: [],
+  showIndicator: true,
 };
 
 export type PairResult =

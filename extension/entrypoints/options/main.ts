@@ -7,6 +7,7 @@ const host = $<HTMLInputElement>('host');
 const port = $<HTMLInputElement>('port');
 const token = $<HTMLInputElement>('token');
 const disabled = $<HTMLTextAreaElement>('disabled');
+const showIndicator = $<HTMLInputElement>('show-indicator');
 const status = $<HTMLSpanElement>('status');
 const remoteHint = $<HTMLParagraphElement>('remote-hint');
 
@@ -19,6 +20,7 @@ async function load(): Promise<void> {
   port.value = String(s.port);
   token.value = s.token;
   disabled.value = s.disabledSites.join('\n');
+  showIndicator.checked = s.showIndicator !== false;
   updateRemoteUI();
 }
 
@@ -50,6 +52,7 @@ async function save(): Promise<ToneSettings | null> {
       .split('\n')
       .map((l) => l.trim().toLowerCase())
       .filter(Boolean),
+    showIndicator: showIndicator.checked,
   };
   if (!(await ensureHostPermission(s))) {
     setStatus('Permission for the remote host was declined.', 'err');

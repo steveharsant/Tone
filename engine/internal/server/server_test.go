@@ -25,17 +25,23 @@ func mockBackend(t *testing.T) *httptest.Server {
 	mux.HandleFunc("GET /api/tags", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"models":[{"name":"mock-model:latest","size":1}]}`))
 	})
-	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/chat", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
+			Think    bool                              `json:"think"`
 			Messages []struct{ Role, Content string } `json:"messages"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
+		if req.Think {
+			// The engine must always disable thinking for checks.
+			http.Error(w, `{"error":"mock: think must be false"}`, http.StatusBadRequest)
+			return
+		}
 		content := `{"suggestions":[]}`
 		if len(req.Messages) > 0 && strings.Contains(req.Messages[len(req.Messages)-1].Content, "definately") {
 			content = `{"suggestions":[{"original":"definately","replacement":"definitely","category":"correctness","rule":"spelling","explanation":"Misspelling of definitely."}]}`
 		}
 		json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": content}}},
+			"message": map[string]string{"role": "assistant", "content": content},
 		})
 	})
 	return httptest.NewServer(mux)
