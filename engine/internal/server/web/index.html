@@ -61,6 +61,21 @@
   </section>
 
   <section class="card">
+    <h2>Dictionary</h2>
+    <p class="hint">Words Tone never flags — names, jargon, product terms.
+    Add from here or via “Add to dictionary” on any suggestion.</p>
+    <div id="dict-list" class="chips"></div>
+    <div class="row">
+      <input id="dict-word" type="text" placeholder="Add a word…" spellcheck="false" style="flex:1">
+      <button id="dict-add" class="ghost">Add</button>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <span class="hint" id="dismissed-count">—</span>
+      <button id="dismissed-clear" class="ghost">Forget dismissals</button>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>Model</h2>
     <label>Active model
       <select id="model-select"></select>

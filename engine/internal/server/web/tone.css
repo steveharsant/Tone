@@ -58,6 +58,17 @@ code.token {
   overflow-wrap: anywhere; margin: 8px 0;
 }
 .hidden { display: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 20px;
+  padding: 3px 10px; font-size: 13px;
+}
+.chip button {
+  background: none; border: 0; color: var(--muted); cursor: pointer;
+  padding: 0 2px; font-size: 14px; line-height: 1;
+}
+.chip button:hover { color: var(--err); }
 label.toggle { display: flex; align-items: center; gap: 8px; margin: 7px 0; cursor: pointer; }
 label.toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
 select, textarea {

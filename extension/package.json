@@ -10,11 +10,13 @@
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
     "zip": "wxt zip",
+    "sign": "npm run build:firefox && node scripts/sign.mjs",
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare"
   },
   "devDependencies": {
     "typescript": "^5.5.0",
+    "web-ext": "^10.5.0",
     "wxt": "^0.20.0"
   }
 }

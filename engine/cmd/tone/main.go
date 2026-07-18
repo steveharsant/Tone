@@ -18,6 +18,7 @@ import (
 	"github.com/steveharsant/tone/engine/internal/config"
 	"github.com/steveharsant/tone/engine/internal/ollama"
 	"github.com/steveharsant/tone/engine/internal/server"
+	"github.com/steveharsant/tone/engine/internal/store"
 	"github.com/steveharsant/tone/engine/internal/tray"
 )
 
@@ -32,6 +33,7 @@ func main() {
 		noTray         = flag.Bool("no-tray", false, "run headless without the system-tray icon")
 		open           = flag.Bool("open", false, "open the settings page in your browser on start")
 		installDesktop = flag.Bool("install-desktop", false, "install a desktop entry (application menu launcher) and exit")
+		installAutostart = flag.Bool("install-autostart", false, "install and enable a systemd user service so the engine starts at login, then exit")
 	)
 	flag.Parse()
 
@@ -67,6 +69,14 @@ func main() {
 		fmt.Println("Desktop entry installed — 'Tone' now appears in your application menu.")
 		return
 	}
+	if *installAutostart {
+		if err := installAutostartUnit(); err != nil {
+			log.Fatalf("install autostart unit: %v", err)
+		}
+		fmt.Println("Autostart installed — the engine now starts at login (systemd user service 'tone').")
+		fmt.Println("  status: systemctl --user status tone")
+		return
+	}
 
 	// Single-instance behavior: if an engine already answers on our port,
 	// launching again (e.g. from the application menu) just opens settings.
@@ -94,7 +104,12 @@ func main() {
 		}()
 	}
 
-	srv := server.New(version, cfg, mgr)
+	memory, err := store.Open(filepath.Join(dataDir, "store.json"))
+	if err != nil {
+		log.Fatalf("open store: %v", err)
+	}
+
+	srv := server.New(version, cfg, mgr, memory)
 	setupURL := fmt.Sprintf("http://127.0.0.1:%d/setup#%s", cfg.Port, cfg.PairingToken)
 
 	if cfg.SetupComplete {
@@ -152,6 +167,50 @@ func engineAlreadyRunning(port int) bool {
 	}
 	resp.Body.Close()
 	return true
+}
+
+// installAutostartUnit writes and enables a systemd *user* service — no
+// root involved — so the engine (and its supervised Ollama) come up at
+// login. The tray needs the desktop session, so the unit binds to the
+// graphical target.
+func installAutostartUnit() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		return err
+	}
+	unit := fmt.Sprintf(`[Unit]
+Description=Tone — local AI writing assistant engine
+After=graphical-session.target
+
+[Service]
+ExecStart=%s
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+`, exe)
+	if err := os.WriteFile(filepath.Join(unitDir, "tone.service"), []byte(unit), 0o644); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"--user", "daemon-reload"},
+		{"--user", "enable", "--now", "tone.service"},
+	} {
+		cmd := exec.Command("systemctl", args...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("systemctl %v: %v: %s", args, err, out)
+		}
+	}
+	return nil
 }
 
 // installDesktopEntry writes an XDG launcher + icon so Tone shows up as a

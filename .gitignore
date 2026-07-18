@@ -9,3 +9,5 @@ extension/.wxt/
 
 # Local scratch
 *.log
+engine/dist/
+extension/web-ext-artifacts/

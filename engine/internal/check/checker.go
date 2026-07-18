@@ -166,20 +166,51 @@ func TiersFor(opts Options) []Tier {
 	return tiers
 }
 
-// CheckTiered runs the enabled checks as sequential priority passes,
-// emitting each tier's suggestions as soon as that pass completes.
+// CheckTiered runs the enabled checks as concurrent priority passes,
+// emitting each tier's suggestions the moment that pass completes. With a
+// GPU backend (OLLAMA_NUM_PARALLEL > 1) the passes genuinely overlap; on a
+// serialized backend they queue and arrive in near-priority order anyway
+// since spelling is submitted first. Emission order is completion order —
+// the extension merges per-tier, so ordering doesn't matter to it.
 func (c *Checker) CheckTiered(ctx context.Context, text string, opts Options, emit func(tier string, sugs []Suggestion, stats Stats)) error {
-	for _, t := range TiersFor(opts) {
-		sugs, stats, err := c.Check(ctx, text, t.Opts)
-		if err != nil {
-			return fmt.Errorf("%s pass: %w", t.Name, err)
-		}
-		if sugs == nil {
-			sugs = []Suggestion{}
-		}
-		emit(t.Name, sugs, stats)
+	tiers := TiersFor(opts)
+	if len(tiers) == 0 {
+		return nil
 	}
-	return nil
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		wg       sync.WaitGroup
+		emitMu   sync.Mutex
+		errMu    sync.Mutex
+		firstErr error
+	)
+	for _, t := range tiers {
+		wg.Add(1)
+		go func(t Tier) {
+			defer wg.Done()
+			sugs, stats, err := c.Check(ctx, text, t.Opts)
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil && ctx.Err() == nil {
+					firstErr = fmt.Errorf("%s pass: %w", t.Name, err)
+					cancel()
+				}
+				errMu.Unlock()
+				return
+			}
+			if sugs == nil {
+				sugs = []Suggestion{}
+			}
+			emitMu.Lock()
+			emit(t.Name, sugs, stats)
+			emitMu.Unlock()
+		}(t)
+	}
+	wg.Wait()
+	return firstErr
 }
 
 // normalizeRule folds case and dash/space variants so "Subject Verb

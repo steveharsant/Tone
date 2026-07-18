@@ -384,7 +384,38 @@ export class FieldSession {
     this.suggestions = this.suggestions.filter((x) => x.id !== s.id);
     this.clearRender();
     this.render();
+    // Durable: the engine remembers dismissals across reloads and devices.
+    void browser.runtime
+      .sendMessage({ type: 'tone:dismiss', category: s.category, original: s.original })
+      .catch(() => {});
   }
+
+  /** Instantly strip every current suggestion of a muted rule type. */
+  removeByRule(rule: string): void {
+    const n = normalizeRule(rule);
+    const before = this.suggestions.length;
+    this.suggestions = this.suggestions.filter((x) => normalizeRule(x.rule ?? '') !== n);
+    if (this.suggestions.length !== before) {
+      this.clearRender();
+      this.render();
+    }
+  }
+
+  /** Instantly strip suggestions for a word just added to the dictionary. */
+  removeByWord(word: string): void {
+    const w = word.trim().toLowerCase();
+    const before = this.suggestions.length;
+    this.suggestions = this.suggestions.filter((x) => x.original.trim().toLowerCase() !== w);
+    if (this.suggestions.length !== before) {
+      this.clearRender();
+      this.render();
+    }
+  }
+}
+
+/** Mirrors the engine's rule normalization (case + dash/space folding). */
+function normalizeRule(rule: string): string {
+  return rule.trim().toLowerCase().replace(/[ _]/g, '-');
 }
 
 /**

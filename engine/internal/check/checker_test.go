@@ -3,6 +3,7 @@ package check
 import (
 	"context"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -172,5 +173,32 @@ func TestOptionsKeyChangesInvalidateCache(t *testing.T) {
 	b := Options{Spelling: true, ToneTarget: "formal"}
 	if a.key() == b.key() {
 		t.Fatal("differing options must produce differing cache keys")
+	}
+}
+
+func TestCheckTieredEmitsAllTiersConcurrently(t *testing.T) {
+	fake := &fakeProvider{responses: map[string]string{
+		"definately": `{"suggestions":[{"original":"definately","replacement":"definitely","category":"correctness","rule":"spelling","explanation":"Typo."}]}`,
+	}}
+	c := New(fake, "m", NewCache(64))
+	got := map[string]int{}
+	var mu sync.Mutex
+	err := c.CheckTiered(context.Background(), "I will definately come.",
+		Options{Spelling: true, Grammar: true, Clarity: true},
+		func(tier string, sugs []Suggestion, _ Stats) {
+			mu.Lock()
+			got[tier] = len(sugs)
+			mu.Unlock()
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("tiers emitted = %v, want spelling/grammar/clarity", got)
+	}
+	// The fake answers every tier's prompt the same way; correctness-category
+	// suggestions only survive the spelling and grammar passes.
+	if got["spelling"] != 1 || got["grammar"] != 1 || got["clarity"] != 0 {
+		t.Errorf("per-tier counts = %v", got)
 	}
 }

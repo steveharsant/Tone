@@ -21,6 +21,7 @@ import (
 	"github.com/steveharsant/tone/engine/internal/ollama"
 	"github.com/steveharsant/tone/engine/internal/pairing"
 	"github.com/steveharsant/tone/engine/internal/provider"
+	"github.com/steveharsant/tone/engine/internal/store"
 )
 
 //go:embed web
@@ -34,6 +35,7 @@ type Server struct {
 	mgr      *ollama.Manager
 	cache    *check.Cache
 	pairings *pairing.Store
+	memory   *store.Store
 
 	pullMu sync.Mutex
 	pull   pullState
@@ -50,14 +52,32 @@ type pullState struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func New(version string, cfg *config.Config, mgr *ollama.Manager) *Server {
+func New(version string, cfg *config.Config, mgr *ollama.Manager, memory *store.Store) *Server {
 	return &Server{
 		Version:  version,
 		cfg:      cfg,
 		mgr:      mgr,
 		cache:    check.NewCache(4096),
 		pairings: pairing.NewStore(),
+		memory:   memory,
 	}
+}
+
+// filterStored drops suggestions the user has permanently rejected: custom
+// dictionary words and previously dismissed edits. Applied after the check
+// (and after the cache) so persistence changes never cost re-inference.
+func (s *Server) filterStored(sugs []check.Suggestion) []check.Suggestion {
+	if s.memory == nil {
+		return sugs
+	}
+	kept := sugs[:0]
+	for _, sg := range sugs {
+		if s.memory.HasWord(sg.Original) || s.memory.IsDismissed(sg.Category, sg.Original) {
+			continue
+		}
+		kept = append(kept, sg)
+	}
+	return kept
 }
 
 // Pairings exposes the pairing store to the tray UI, which shares the
@@ -110,6 +130,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/setup/complete", s.auth(s.handleSetupComplete))
 	mux.HandleFunc("GET /api/settings", s.auth(s.handleGetSettings))
 	mux.HandleFunc("POST /api/settings", s.auth(s.handleSaveSettings))
+
+	// Editorial memory: mute a rule type, remember dismissals, dictionary.
+	mux.HandleFunc("POST /v1/rules/ignore", s.auth(s.handleIgnoreRule))
+	mux.HandleFunc("POST /v1/dismissals", s.auth(s.handleAddDismissal))
+	mux.HandleFunc("DELETE /v1/dismissals", s.auth(s.handleClearDismissals))
+	mux.HandleFunc("GET /v1/dictionary", s.auth(s.handleGetDictionary))
+	mux.HandleFunc("POST /v1/dictionary", s.auth(s.handleAddWord))
+	mux.HandleFunc("DELETE /v1/dictionary", s.auth(s.handleRemoveWord))
 
 	// Pairing: request/poll are unauthenticated by design (the extension has
 	// no token yet); a human approval gates the token handover.

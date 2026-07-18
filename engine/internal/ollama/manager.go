@@ -131,7 +131,13 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 	cmd := exec.Command(bin, "serve")
-	cmd.Env = append(os.Environ(), "OLLAMA_HOST=127.0.0.1:11434")
+	// NUM_PARALLEL lets Tone's concurrent tier passes (spelling/grammar/
+	// clarity/…) actually overlap on the GPU instead of queuing. Applies to
+	// the supervised server only; a user-managed Ollama keeps its own config.
+	cmd.Env = append(os.Environ(),
+		"OLLAMA_HOST=127.0.0.1:11434",
+		"OLLAMA_NUM_PARALLEL=3",
+	)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	// Own process group so Stop can take down the runner subprocesses too.

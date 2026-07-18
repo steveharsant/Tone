@@ -21,6 +21,18 @@ export default defineBackground(() => {
         return siteStatus(sender.url ?? sender.tab?.url);
       case 'tone:pair':
         return pair();
+      case 'tone:dismiss': {
+        const d = msg as { category?: string; original?: string };
+        return enginePost('/v1/dismissals', { category: d.category, original: d.original });
+      }
+      case 'tone:ignoreRule': {
+        const d = msg as { rule?: string };
+        return enginePost('/v1/rules/ignore', { rule: d.rule });
+      }
+      case 'tone:addWord': {
+        const d = msg as { word?: string };
+        return enginePost('/v1/dictionary', { word: d.word });
+      }
     }
   });
 
@@ -145,6 +157,27 @@ async function pair(): Promise<PairResult> {
     }
   }
   return { ok: false, error: 'timeout' };
+}
+
+/** Small authed POST for the editorial-memory endpoints. Best-effort: the
+ * content script applies the change locally regardless. */
+async function enginePost(path: string, body: unknown): Promise<{ ok: boolean }> {
+  const settings = await getSettings();
+  if (!settings.token) return { ok: false };
+  try {
+    const resp = await fetch(engineURL(settings, path), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${settings.token}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
+    });
+    return { ok: resp.ok };
+  } catch {
+    return { ok: false };
+  }
 }
 
 async function checkText(text: string): Promise<CheckResult> {

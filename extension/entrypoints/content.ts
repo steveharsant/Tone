@@ -63,6 +63,15 @@ export default defineContentScript({
     const popover = new Popover({
       onAccept: (s: Suggestion) => popoverOwner?.accept(s),
       onDismiss: (s: Suggestion) => popoverOwner?.dismiss(s),
+      onIgnoreRule: (s: Suggestion) => {
+        if (!s.rule) return;
+        void browser.runtime.sendMessage({ type: 'tone:ignoreRule', rule: s.rule }).catch(() => {});
+        for (const session of sessions) session.removeByRule(s.rule);
+      },
+      onAddWord: (s: Suggestion) => {
+        void browser.runtime.sendMessage({ type: 'tone:addWord', word: s.original.trim() }).catch(() => {});
+        for (const session of sessions) session.removeByWord(s.original);
+      },
     });
 
     let lastMove = 0;

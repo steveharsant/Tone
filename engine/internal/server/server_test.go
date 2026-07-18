@@ -11,6 +11,7 @@ import (
 
 	"github.com/steveharsant/tone/engine/internal/config"
 	"github.com/steveharsant/tone/engine/internal/ollama"
+	"github.com/steveharsant/tone/engine/internal/store"
 )
 
 // mockBackend impersonates Ollama: version probe, model list, and an
@@ -63,7 +64,8 @@ func testServer(t *testing.T) (*httptest.Server, string) {
 	mgr := ollama.NewManager(filepath.Join(t.TempDir(), "ollama"))
 	mgr.BaseURL = backend.URL
 
-	s := New("test", cfg, mgr)
+	memory, _ := store.Open(filepath.Join(t.TempDir(), "store.json"))
+	s := New("test", cfg, mgr, memory)
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 	return ts, cfg.PairingToken
@@ -201,5 +203,101 @@ func TestQueryStringTokenRejected(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("query-string token accepted: %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestStoredMemoryFiltersSuggestions(t *testing.T) {
+	ts, token := testServer(t)
+	post := func(path, body string) int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	check := func() int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/check", strings.NewReader(`{"text":"I will definately be there."}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out struct {
+			Suggestions []struct{ Original string } `json:"suggestions"`
+		}
+		json.NewDecoder(resp.Body).Decode(&out)
+		return len(out.Suggestions)
+	}
+
+	if n := check(); n != 1 {
+		t.Fatalf("baseline: want 1 suggestion, got %d", n)
+	}
+	// Dismiss the exact edit → filtered out (cache untouched: same segments).
+	if code := post("/v1/dismissals", `{"category":"correctness","original":"definately"}`); code != 200 {
+		t.Fatalf("dismissal POST = %d", code)
+	}
+	if n := check(); n != 0 {
+		t.Fatalf("after dismissal: want 0 suggestions, got %d", n)
+	}
+}
+
+func TestDictionaryFiltersSuggestions(t *testing.T) {
+	ts, token := testServer(t)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/dictionary", strings.NewReader(`{"word":"definately"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	checkReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/check", strings.NewReader(`{"text":"I will definately be there."}`))
+	checkReq.Header.Set("Authorization", "Bearer "+token)
+	resp2, err := http.DefaultClient.Do(checkReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	var out struct {
+		Suggestions []any `json:"suggestions"`
+	}
+	json.NewDecoder(resp2.Body).Decode(&out)
+	if len(out.Suggestions) != 0 {
+		t.Fatalf("dictionary word still flagged: %d suggestions", len(out.Suggestions))
+	}
+}
+
+func TestIgnoreRuleEndpoint(t *testing.T) {
+	ts, token := testServer(t)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/rules/ignore", strings.NewReader(`{"rule":"spelling"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("ignore rule = %d", resp.StatusCode)
+	}
+	// The mock only emits rule "spelling" → everything now filtered.
+	checkReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/check", strings.NewReader(`{"text":"I will definately be there."}`))
+	checkReq.Header.Set("Authorization", "Bearer "+token)
+	resp2, err := http.DefaultClient.Do(checkReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	var out struct {
+		Suggestions []any `json:"suggestions"`
+	}
+	json.NewDecoder(resp2.Body).Decode(&out)
+	if len(out.Suggestions) != 0 {
+		t.Fatalf("ignored rule still flagged: %d", len(out.Suggestions))
 	}
 }

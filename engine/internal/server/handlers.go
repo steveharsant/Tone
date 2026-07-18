@@ -73,6 +73,10 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	if req.Stream || r.URL.Query().Get("stream") == "1" {
 		out := newNDJSON(w)
 		err := chk.CheckTiered(r.Context(), req.Text, opts, func(tier string, sugs []check.Suggestion, stats check.Stats) {
+			sugs = s.filterStored(sugs)
+			if sugs == nil {
+				sugs = []check.Suggestion{}
+			}
 			out.send(map[string]any{"tier": tier, "suggestions": sugs, "stats": stats})
 		})
 		if err != nil && r.Context().Err() == nil {
@@ -88,6 +92,7 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "provider error: "+err.Error())
 		return
 	}
+	sugs = s.filterStored(sugs)
 	// Optional per-request narrowing (kept for API compatibility).
 	if len(req.Categories) > 0 {
 		want := make(map[string]bool, len(req.Categories))
@@ -232,6 +237,102 @@ func cleanLines(in []string, maxLen int) []string {
 		out = append(out, l)
 	}
 	return out
+}
+
+// --- editorial memory API ----------------------------------------------
+
+// handleIgnoreRule permanently mutes a suggestion rule type ("Ignore all"
+// in the popover). Lands in config.DisabledRules, the same list users edit
+// on the settings page.
+func (s *Server) handleIgnoreRule(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Rule string `json:"rule"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Rule) == "" {
+		writeErr(w, http.StatusBadRequest, "body must be {\"rule\":\"...\"}")
+		return
+	}
+	rule := strings.TrimSpace(req.Rule)
+	s.mu.Lock()
+	exists := false
+	for _, existing := range s.cfg.DisabledRules {
+		if strings.EqualFold(existing, rule) {
+			exists = true
+			break
+		}
+	}
+	var err error
+	if !exists {
+		s.cfg.DisabledRules = append(s.cfg.DisabledRules, rule)
+		err = s.cfg.Save()
+	}
+	s.mu.Unlock()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "save config: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleAddDismissal(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Category string `json:"category"`
+		Original string `json:"original"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Category == "" || req.Original == "" {
+		writeErr(w, http.StatusBadRequest, "body must be {\"category\":\"...\",\"original\":\"...\"}")
+		return
+	}
+	if err := s.memory.AddDismissal(req.Category, req.Original); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleClearDismissals(w http.ResponseWriter, r *http.Request) {
+	if err := s.memory.ClearDismissals(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleGetDictionary(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"words":     s.memory.Words(),
+		"dismissed": s.memory.DismissedCount(),
+	})
+}
+
+func (s *Server) handleAddWord(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Word string `json:"word"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Word) == "" {
+		writeErr(w, http.StatusBadRequest, "body must be {\"word\":\"...\"}")
+		return
+	}
+	if err := s.memory.AddWord(req.Word); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleRemoveWord(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Word string `json:"word"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Word) == "" {
+		writeErr(w, http.StatusBadRequest, "body must be {\"word\":\"...\"}")
+		return
+	}
+	if err := s.memory.RemoveWord(req.Word); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // --- pairing API -------------------------------------------------------

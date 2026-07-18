@@ -97,6 +97,50 @@
     }
   }
 
+  async function loadDictionary() {
+    const d = await (await api('/v1/dictionary')).json();
+    const list = $('dict-list');
+    list.innerHTML = '';
+    for (const word of d.words || []) {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.append(word);
+      const x = document.createElement('button');
+      x.textContent = '×';
+      x.title = 'Remove';
+      x.onclick = async () => {
+        await api('/v1/dictionary', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ word }),
+        });
+        loadDictionary();
+      };
+      chip.append(x);
+      list.append(chip);
+    }
+    $('dismissed-count').textContent = `${d.dismissed || 0} dismissed suggestion${d.dismissed === 1 ? '' : 's'} remembered`;
+  }
+
+  $('dict-add').onclick = async () => {
+    const word = $('dict-word').value.trim();
+    if (!word) return;
+    await api('/v1/dictionary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ word }),
+    });
+    $('dict-word').value = '';
+    loadDictionary();
+  };
+  $('dict-word').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('dict-add').click();
+  });
+  $('dismissed-clear').onclick = async () => {
+    await api('/v1/dismissals', { method: 'DELETE' });
+    loadDictionary();
+  };
+
   $('save').onclick = async () => {
     const lines = (v) => v.split('\n').map((l) => l.trim()).filter(Boolean);
     const body = {
@@ -124,6 +168,7 @@
 
   loadHealth();
   loadSettings().catch((e) => ($('save-status').textContent = 'Load failed: ' + e.message));
+  loadDictionary().catch(() => {});
   loadPairing();
   setInterval(loadPairing, 3000);
 })();

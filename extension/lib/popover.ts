@@ -8,6 +8,10 @@ import { CATEGORY_COLORS, CATEGORY_LABELS, type Suggestion } from './types';
 export interface PopoverActions {
   onAccept: (s: Suggestion) => void;
   onDismiss: (s: Suggestion) => void;
+  /** Permanently mute this suggestion's rule type ("Ignore all"). */
+  onIgnoreRule: (s: Suggestion) => void;
+  /** Add the flagged word to the custom dictionary. */
+  onAddWord: (s: Suggestion) => void;
 }
 
 const STYLE = `
@@ -31,11 +35,16 @@ const STYLE = `
 .repl .arrow { margin: 0 6px; opacity: .5; }
 .repl .to { font-weight: 600; }
 .expl { opacity: .85; margin-bottom: 10px; }
-.row { display: flex; gap: 8px; }
+.row { display: flex; gap: 8px; align-items: center; }
 button { font: inherit; border-radius: 7px; padding: 5px 14px; cursor: pointer; border: 0; }
 .accept { background: var(--cat, #4f6df5); color: #fff; }
 .dismiss { background: transparent; color: inherit; opacity: .7; }
 .dismiss:hover { opacity: 1; }
+.more { display: flex; gap: 12px; margin-top: 9px; padding-top: 8px;
+  border-top: 1px solid rgba(128,128,128,.25); flex-wrap: wrap; }
+.more button { background: none; padding: 0; font-size: 12px; color: inherit;
+  opacity: .6; text-decoration: underline; text-underline-offset: 2px; }
+.more button:hover { opacity: 1; }
 `;
 
 export class Popover {
@@ -112,7 +121,31 @@ export class Popover {
     };
     row.append(accept, dismiss);
 
+    // Secondary, quieter actions: permanent mutes.
+    const more = el('div', 'more');
+    if (s.rule) {
+      const ignore = el('button', 'ignore') as HTMLButtonElement;
+      ignore.textContent = `Ignore all “${s.rule}”`;
+      ignore.title = 'Never flag this type of suggestion again';
+      ignore.onclick = () => {
+        this.actions.onIgnoreRule(s);
+        this.hide();
+      };
+      more.append(ignore);
+    }
+    if (s.category === 'correctness' && /^\S+$/.test(s.original.trim())) {
+      const addWord = el('button', 'add-word') as HTMLButtonElement;
+      addWord.textContent = 'Add to dictionary';
+      addWord.title = `Never flag “${s.original}” again`;
+      addWord.onclick = () => {
+        this.actions.onAddWord(s);
+        this.hide();
+      };
+      more.append(addWord);
+    }
+
     this.pop.append(cat, repl, expl, row);
+    if (more.childElementCount > 0) this.pop.append(more);
     this.pop.style.display = 'block';
 
     // Position below the underline; flip above if it would overflow.
