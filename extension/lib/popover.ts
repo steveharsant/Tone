@@ -14,6 +14,8 @@ export interface PopoverActions {
   onAddWord: (s: Suggestion) => void;
   /** Hide this exact suggestion for a while (24h). */
   onSnooze: (s: Suggestion) => void;
+  /** Fix-all popover: hide every current suggestion in the field. */
+  onDismissAll: (s: Suggestion) => void;
 }
 
 const STYLE = `
@@ -103,15 +105,15 @@ export class Popover {
     const cat = el('div', 'cat');
     const dot = el('span', 'dot');
     dot.style.background = color;
-    cat.append(dot, CATEGORY_LABELS[s.category] ?? s.category);
+    cat.append(dot, s.fixCount ? `Fix whole sentence · ${s.fixCount} issues` : (CATEGORY_LABELS[s.category] ?? s.category));
 
     const repl = el('div', 'repl');
     const from = el('span', 'from');
-    from.textContent = clip(s.original, 60);
+    from.textContent = clip(s.original, s.fixCount ? 140 : 60);
     const arrow = el('span', 'arrow');
     arrow.textContent = '→';
     const to = el('span', 'to');
-    to.textContent = clip(s.replacement, 80);
+    to.textContent = clip(s.replacement, s.fixCount ? 160 : 80);
     repl.append(from, arrow, to);
 
     // Alternative corrections: the intended word is often not the closest
@@ -151,10 +153,21 @@ export class Popover {
       this.hide();
     };
     row.append(accept, dismiss);
+    if (s.fixCount) {
+      const dismissAll = el('button', 'dismiss') as HTMLButtonElement;
+      dismissAll.textContent = 'Dismiss all';
+      dismissAll.title = 'Hide every current suggestion in this field';
+      dismissAll.onclick = () => {
+        this.actions.onDismissAll(s);
+        this.hide();
+      };
+      row.append(dismissAll);
+    }
 
-    // Secondary, quieter actions: snooze and permanent mutes.
+    // Secondary, quieter actions: snooze and permanent mutes. Fix-alls keep
+    // it simple: Accept / Dismiss / Dismiss all only.
     const more = el('div', 'more');
-    {
+    if (!s.fixCount) {
       const snooze = el('button', 'snooze') as HTMLButtonElement;
       snooze.textContent = 'Snooze 24h';
       snooze.title = 'Hide this suggestion until tomorrow';
@@ -164,7 +177,7 @@ export class Popover {
       };
       more.append(snooze);
     }
-    if (s.rule) {
+    if (s.rule && !s.fixCount) {
       const ignore = el('button', 'ignore') as HTMLButtonElement;
       ignore.textContent = `Ignore all “${s.rule}”`;
       ignore.title = 'Never flag this type of suggestion again';

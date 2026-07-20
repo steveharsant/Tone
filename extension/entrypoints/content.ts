@@ -38,6 +38,10 @@ export default defineContentScript({
         indicatorEnabled = changes.showIndicator.newValue !== false;
         indicator?.setEnabled(indicatorEnabled);
       }
+      if ('fixAll' in changes) {
+        const enabled = changes.fixAll.newValue !== false;
+        for (const session of sessions) session.fixAllEnabled = enabled;
+      }
     });
 
     const sessions = new Set<FieldSession>();
@@ -74,6 +78,7 @@ export default defineContentScript({
         for (const session of sessions) session.removeByWord(s.original);
       },
       onSnooze: (s: Suggestion) => popoverOwner?.snooze(s, 24),
+      onDismissAll: () => popoverOwner?.dismissAll(),
     });
 
     // --- keyboard review: Alt+↓/↑ step through suggestions, Alt+Enter
@@ -206,6 +211,7 @@ export default defineContentScript({
         let session = sessionByEl.get(el);
         if (!session) {
           session = new FieldSession(el, kind, rebuildHighlights, onState);
+          session.fixAllEnabled = status.fixAll !== false;
           sessionByEl.set(el, session);
           sessions.add(session);
         }

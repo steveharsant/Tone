@@ -19,6 +19,16 @@ export interface Suggestion {
   rule?: string;
   explanation: string;
   confidence: number;
+  /** Set on synthesized whole-sentence fixes: how many issues it combines. */
+  fixCount?: number;
+}
+
+/** A whole-sentence suggestion combining 2+ individual fixes. */
+export interface SentenceFix {
+  span: Span;
+  original: string;
+  replacement: string;
+  count: number;
 }
 
 export const CATEGORY_COLORS: Record<Category, string> = {
@@ -47,7 +57,7 @@ export type CheckResult =
  */
 export type CheckStreamMessage =
   | { tier: string; suggestions: Suggestion[] }
-  | { done: true; score?: number }
+  | { done: true; score?: number; sentence_fixes?: SentenceFix[] }
   | { error: string; disconnected?: boolean };
 
 export type RewriteResult =
@@ -71,6 +81,8 @@ export interface SiteStatus {
   enabled: boolean;
   paired: boolean;
   showIndicator: boolean;
+  /** Combine 2+ fixes in one sentence into a single whole-sentence suggestion. */
+  fixAll: boolean;
 }
 
 export interface ToneSettings {
@@ -82,6 +94,8 @@ export interface ToneSettings {
   disabledSites: string[];
   /** Show the bottom-right status pill on pages. */
   showIndicator: boolean;
+  /** Offer one whole-sentence fix first when a sentence has 2+ issues. */
+  fixAll: boolean;
 }
 
 export const DEFAULT_SETTINGS: ToneSettings = {
@@ -91,6 +105,7 @@ export const DEFAULT_SETTINGS: ToneSettings = {
   token: '',
   disabledSites: [],
   showIndicator: true,
+  fixAll: true,
 };
 
 export type PairResult =

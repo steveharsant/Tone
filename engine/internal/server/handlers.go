@@ -39,9 +39,10 @@ type checkRequest struct {
 }
 
 type checkResponse struct {
-	Suggestions []check.Suggestion `json:"suggestions"`
-	Stats       check.Stats        `json:"stats"`
-	Score       int                `json:"score"`
+	Suggestions   []check.Suggestion  `json:"suggestions"`
+	Stats         check.Stats         `json:"stats"`
+	Score         int                 `json:"score"`
+	SentenceFixes []check.SentenceFix `json:"sentence_fixes,omitempty"`
 }
 
 func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +89,11 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 			out.send(map[string]any{"error": "provider error: " + err.Error()})
 			return
 		}
-		out.send(map[string]any{"done": true, "score": check.Score(req.Text, all)})
+		out.send(map[string]any{
+			"done":           true,
+			"score":          check.Score(req.Text, all),
+			"sentence_fixes": check.SentenceFixes(req.Text, all),
+		})
 		return
 	}
 
@@ -115,7 +120,12 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	if sugs == nil {
 		sugs = []check.Suggestion{}
 	}
-	writeJSON(w, http.StatusOK, checkResponse{Suggestions: sugs, Stats: stats, Score: check.Score(req.Text, sugs)})
+	writeJSON(w, http.StatusOK, checkResponse{
+		Suggestions:   sugs,
+		Stats:         stats,
+		Score:         check.Score(req.Text, sugs),
+		SentenceFixes: check.SentenceFixes(req.Text, sugs),
+	})
 }
 
 // --- /v1/rewrite -------------------------------------------------------

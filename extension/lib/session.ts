@@ -43,6 +43,11 @@ export class FieldSession {
   readonly kind: EditableKind;
 
   private suggestions: TieredSuggestion[] = [];
+  /** Synthesized whole-sentence fixes (feature-toggleable). */
+  private fixAlls: TieredSuggestion[] = [];
+  private dismissedFixAlls = new Set<string>();
+  /** Toggled from extension options ("Fix whole sentence first"). */
+  fixAllEnabled = true;
   private dismissed = new Set<string>();
   private lastCheckedText = '';
   /** The text the current suggestion spans refer to (kept in sync on edits). */
@@ -113,19 +118,21 @@ export class FieldSession {
     const edit = diffEdit(this.renderedText, newText);
     if (edit) {
       const delta = edit.newEnd - edit.oldEnd;
-      this.suggestions = this.suggestions.filter((s) => {
-        if (s.span.end <= edit.start) return true; // before the edit
-        if (s.span.start >= edit.oldEnd) {
-          s.span = { start: s.span.start + delta, end: s.span.end + delta };
-          return true;
-        }
-        return false; // overlaps the edit
-      });
-      // Safety: a multi-caret or IME edit can defeat the single-edit model;
-      // anything whose text no longer matches gets dropped, never misdrawn.
-      this.suggestions = this.suggestions.filter(
-        (s) => newText.slice(s.span.start, s.span.end) === s.original,
-      );
+      const shiftList = (list: TieredSuggestion[]) =>
+        list
+          .filter((s) => {
+            if (s.span.end <= edit.start) return true; // before the edit
+            if (s.span.start >= edit.oldEnd) {
+              s.span = { start: s.span.start + delta, end: s.span.end + delta };
+              return true;
+            }
+            return false; // overlaps the edit
+          })
+          // Safety: a multi-caret or IME edit can defeat the single-edit
+          // model; anything whose text no longer matches gets dropped.
+          .filter((s) => newText.slice(s.span.start, s.span.end) === s.original);
+      this.suggestions = shiftList(this.suggestions);
+      this.fixAlls = shiftList(this.fixAlls);
       this.renderedText = newText;
       this.render();
     }
@@ -183,7 +190,29 @@ export class FieldSession {
       }
       if ('done' in msg) {
         this.lastCheckedText = text;
-        const n = this.suggestions.length;
+        // Whole-sentence fixes arrive with the final message (they combine
+        // results across tiers). Individuals inside a fix-all's span hide
+        // behind it until the fix-all is accepted or dismissed.
+        if (this.fixAllEnabled && this.getText() === text) {
+          this.fixAlls = (msg.sentence_fixes ?? [])
+            .filter((f) => f.replacement !== f.original && !this.dismissedFixAlls.has(f.original))
+            .map((f) => ({
+              id: `fixall-${f.span.start}-${f.span.end}`,
+              span: { ...f.span },
+              original: f.original,
+              replacement: f.replacement,
+              category: 'correctness' as const,
+              tier: 'fix-all',
+              rule: 'fix-all',
+              explanation: `Fixes ${f.count} issues in this sentence.`,
+              confidence: 1,
+              fixCount: f.count,
+            }));
+          this.render();
+        } else if (!this.fixAllEnabled) {
+          this.fixAlls = [];
+        }
+        const n = this.display().length;
         const scorePart = typeof msg.score === 'number' ? `Score ${msg.score} · ` : '';
         this.onState('done', scorePart + (n === 0 ? 'Looks good' : `${n} suggestion${n === 1 ? '' : 's'}`));
         this.finishCheck(port);
@@ -284,12 +313,25 @@ export class FieldSession {
     return out;
   }
 
+  /**
+   * What actually renders: fix-alls first, plus individuals not covered by
+   * a fix-all's sentence span. Dismissing a fix-all reveals its individuals.
+   */
+  private display(): TieredSuggestion[] {
+    if (this.fixAlls.length === 0) return this.suggestions;
+    const covered = (s: TieredSuggestion) =>
+      this.fixAlls.some((f) => s.span.start >= f.span.start && s.span.end <= f.span.end);
+    return [...this.fixAlls, ...this.suggestions.filter((s) => !covered(s))].sort(
+      (a, b) => a.span.start - b.span.start,
+    );
+  }
+
   private renderCE(): void {
     this.ceRendered = [];
     if (!this.map) this.getText();
     const map = this.map;
     if (!map) return;
-    for (const s of this.suggestions) {
+    for (const s of this.display()) {
       const range = rangeFromSpan(map, s.span.start, s.span.end);
       if (range) this.ceRendered.push({ suggestion: s, range });
     }
@@ -298,11 +340,11 @@ export class FieldSession {
   private renderForm(): void {
     const el = this.el as FormField;
     this.formRendered = [];
-    const spans = this.suggestions.map((s) => s.span);
-    const measured = measureSpans(el, spans);
-    for (let i = 0; i < this.suggestions.length; i++) {
+    const shown = this.display();
+    const measured = measureSpans(el, shown.map((s) => s.span));
+    for (let i = 0; i < shown.length; i++) {
       if (measured[i]?.length) {
-        this.formRendered.push({ suggestion: this.suggestions[i], rects: measured[i] });
+        this.formRendered.push({ suggestion: shown[i], rects: measured[i] });
       }
     }
     this.ensureOverlay();
@@ -446,9 +488,9 @@ export class FieldSession {
     return r.width || r.height ? r : null;
   }
 
-  /** Current suggestions in document order (for keyboard review). */
+  /** Current visible suggestions in document order (for keyboard review). */
   getSuggestions(): Suggestion[] {
-    return [...this.suggestions];
+    return this.display();
   }
 
   /** Viewport rect of a rendered suggestion (anchor for keyboard review). */
@@ -478,11 +520,30 @@ export class FieldSession {
   }
 
   dismiss(s: Suggestion): void {
+    if (s.fixCount) {
+      // Dismissing a fix-all reveals the individual suggestions beneath it.
+      // Session-local: a whole sentence is too specific to persist.
+      this.dismissedFixAlls.add(s.original);
+      this.fixAlls = this.fixAlls.filter((f) => f.id !== s.id);
+      this.clearRender();
+      this.render();
+      return;
+    }
     this.dismissedLocallyOnly(s);
     // Durable: the engine remembers dismissals across reloads and devices.
     void browser.runtime
       .sendMessage({ type: 'tone:dismiss', category: s.category, original: s.original })
       .catch(() => {});
+  }
+
+  /** "Dismiss all": hides every current suggestion in this field. */
+  dismissAll(): void {
+    for (const f of this.fixAlls) this.dismissedFixAlls.add(f.original);
+    for (const s of this.suggestions) this.dismissed.add(keyOf(s));
+    this.fixAlls = [];
+    this.suggestions = [];
+    this.clearRender();
+    this.render();
   }
 
   /** Instantly strip every current suggestion of a muted rule type. */
