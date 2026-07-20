@@ -188,3 +188,19 @@ func TestNoExpansionForDuplicateWordFix(t *testing.T) {
 		t.Errorf("span covers %q, want plain 'teh'", covered)
 	}
 }
+
+func TestMalformedReplacementRejected(t *testing.T) {
+	got := anchorAll("I don't know.", []RawSuggestion{
+		{Original: "don't", Replacement: "do n't", Category: "clarity"},
+	})
+	if len(got) != 0 {
+		t.Fatalf("tokenizer-debris replacement must be dropped: %+v", got)
+	}
+	// Legit apostrophes inside words are fine.
+	ok := anchorAll("I dont know.", []RawSuggestion{
+		{Original: "dont", Replacement: "don't", Category: "correctness"},
+	})
+	if len(ok) != 1 {
+		t.Fatal("normal contraction replacement must survive")
+	}
+}

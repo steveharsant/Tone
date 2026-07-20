@@ -23,6 +23,19 @@
     <p class="hint" id="health-detail"></p>
   </section>
 
+  <section class="card">
+    <h2>Language</h2>
+    <label>Spelling convention
+      <select id="language">
+        <option value="">Automatic (match the text)</option>
+        <option value="en-GB">British English</option>
+        <option value="en-US">American English</option>
+      </select>
+    </label>
+    <p class="hint">Affects spelling only (colour/color, organise/organize) —
+    contractions and grammar are the same in both.</p>
+  </section>
+
   <section class="card hidden" id="pairing-card">
     <h2>Pairing requests</h2>
     <p class="hint">A browser extension is asking to connect. Only approve if you
@@ -45,13 +58,6 @@
         <option value="confident">Confident</option>
         <option value="friendly">Friendly</option>
         <option value="academic">Academic</option>
-      </select>
-    </label>
-    <label>Language
-      <select id="language">
-        <option value="">Automatic (match the text)</option>
-        <option value="en-GB">British English</option>
-        <option value="en-US">American English</option>
       </select>
     </label>
   </section>

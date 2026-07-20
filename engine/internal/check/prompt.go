@@ -50,7 +50,7 @@ func (o Options) AllowedCategories() map[string]bool {
 // promptVersion MUST be bumped whenever any prompt template above changes:
 // cached results are keyed on options + segment text only, so without a
 // version, stale results from the old prompts would be served forever.
-const promptVersion = "pv5"
+const promptVersion = "pv6"
 
 // key serializes the prompt-affecting state for cache keying.
 func (o Options) key() string {
@@ -118,9 +118,9 @@ func buildMessages(segText string, opts Options) []provider.Message {
 
 	switch opts.Language {
 	case "en-GB":
-		sb.WriteString("\n\nThe writer uses BRITISH English. British spellings (colour, organise, centre, travelled) are correct — never flag them. Flag American spellings (color, organize) as errors with the British form as the replacement.")
+		sb.WriteString("\n\nThe writer uses BRITISH English. This affects SPELLING VARIANTS ONLY: British spellings (colour, organise, centre, travelled) are correct — never flag them; flag American spelling variants (color, organize, center) with the British form as the replacement. Contractions (Let's, don't, it's), vocabulary, and grammar are NOT spelling variants — never flag them as American; \"Let's\" is correct British English.")
 	case "en-US":
-		sb.WriteString("\n\nThe writer uses AMERICAN English. American spellings (color, organize, center, traveled) are correct — never flag them. Flag British spellings (colour, organise) as errors with the American form as the replacement.")
+		sb.WriteString("\n\nThe writer uses AMERICAN English. This affects SPELLING VARIANTS ONLY: American spellings (color, organize, center, traveled) are correct — never flag them; flag British spelling variants (colour, organise, centre) with the American form as the replacement. Contractions (Let's, don't, it's), vocabulary, and grammar are NOT spelling variants — never flag them as British.")
 	}
 
 	if len(opts.StyleRules) > 0 {

@@ -51,6 +51,9 @@ func anchorAll(segText string, raws []RawSuggestion) []anchored {
 		if strings.TrimSpace(orig) == "" || raw.Replacement == orig {
 			continue
 		}
+		if malformedReplacement(raw.Replacement) {
+			continue
+		}
 		s, e, ok := findUnclaimed(segText, orig, overlaps)
 		if !ok {
 			trimmed := strings.TrimSpace(orig)
@@ -162,6 +165,32 @@ func editDistance(a, b string) int {
 		prev, cur = cur, prev
 	}
 	return prev[len(b)]
+}
+
+// malformedReplacement rejects tokenizer debris the model occasionally
+// emits, like "do n't" — a space directly before an apostrophe-word is
+// never valid English output.
+func malformedReplacement(repl string) bool {
+	// "do n't": the n't suffix split off as its own token.
+	if strings.Contains(repl, " n't") || strings.Contains(repl, " n’t") {
+		return true
+	}
+	// " 's", " 're", " 'll", …: apostrophe-suffix tokens after a space.
+	for _, marker := range []string{" '", " ’"} {
+		idx := 0
+		for {
+			i := strings.Index(repl[idx:], marker)
+			if i < 0 {
+				break
+			}
+			after := repl[idx+i+len(marker):]
+			if r, _ := utf8.DecodeRuneInString(after); unicode.IsLetter(r) {
+				return true
+			}
+			idx += i + len(marker)
+		}
+	}
+	return false
 }
 
 // findUnclaimed returns the first exact occurrence of needle in hay that
