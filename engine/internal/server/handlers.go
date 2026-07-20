@@ -63,6 +63,7 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		Vocabulary:    s.cfg.Checks.Vocabulary,
 		Tone:          s.cfg.Checks.Tone,
 		ToneTarget:    s.cfg.ToneTarget,
+		Language:      s.cfg.Language,
 		StyleRules:    append([]string(nil), s.cfg.StyleRules...),
 		DisabledRules: append([]string(nil), s.cfg.DisabledRules...),
 	}
@@ -257,6 +258,7 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 type settingsPayload struct {
 	Checks        *config.Checks `json:"checks,omitempty"`
 	ToneTarget    *string        `json:"tone_target,omitempty"`
+	Language      *string        `json:"language,omitempty"`
 	StyleRules    []string       `json:"style_rules,omitempty"`    // nil = untouched, [] = clear
 	DisabledRules []string       `json:"disabled_rules,omitempty"` // nil = untouched, [] = clear
 	Model         string         `json:"model,omitempty"`
@@ -290,6 +292,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"checks":         s.cfg.Checks,
 		"tone_target":    s.cfg.ToneTarget,
+		"language":       s.cfg.Language,
 		"style_rules":    s.cfg.StyleRules,
 		"disabled_rules": s.cfg.DisabledRules,
 		"provider":       s.cfg.Provider,
@@ -413,6 +416,10 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid tone_target")
 		return
 	}
+	if p.Language != nil && *p.Language != "" && *p.Language != "en-GB" && *p.Language != "en-US" {
+		writeErr(w, http.StatusBadRequest, "invalid language")
+		return
+	}
 	if len(p.StyleRules) > 50 || len(p.DisabledRules) > 100 {
 		writeErr(w, http.StatusBadRequest, "too many rules")
 		return
@@ -427,6 +434,9 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.ToneTarget != nil {
 		s.cfg.ToneTarget = *p.ToneTarget
+	}
+	if p.Language != nil {
+		s.cfg.Language = *p.Language
 	}
 	if p.StyleRules != nil {
 		s.cfg.StyleRules = cleanLines(p.StyleRules, 200)
@@ -445,6 +455,11 @@ func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		s.cfg.Provider.Type = p.Provider.Type
 		s.cfg.Provider.Model = strings.TrimSpace(p.Provider.Model)
+		// A configured provider with a model IS a completed setup (the
+		// wizard's cloud path lands here).
+		if s.cfg.Provider.Model != "" {
+			s.cfg.SetupComplete = true
+		}
 	} else if p.Model != "" {
 		s.cfg.Provider.Model = p.Model
 	}
@@ -528,8 +543,21 @@ func (s *Server) handleAddDismissal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// handleClearDismissals: with {category, original} in the body it forgets
+// that one dismissal; with no/empty body it forgets all of them.
 func (s *Server) handleClearDismissals(w http.ResponseWriter, r *http.Request) {
-	if err := s.memory.ClearDismissals(); err != nil {
+	var req struct {
+		Category string `json:"category"`
+		Original string `json:"original"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	var err error
+	if req.Category != "" && req.Original != "" {
+		err = s.memory.RemoveDismissal(req.Category, req.Original)
+	} else {
+		err = s.memory.ClearDismissals()
+	}
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -538,8 +566,9 @@ func (s *Server) handleClearDismissals(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetDictionary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"words":     s.memory.Words(),
-		"dismissed": s.memory.DismissedCount(),
+		"words":      s.memory.Words(),
+		"dismissed":  s.memory.DismissedCount(),
+		"dismissals": s.memory.Dismissals(),
 	})
 }
 

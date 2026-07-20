@@ -260,7 +260,7 @@ func TestAlternativesFlowThrough(t *testing.T) {
 		"hers": `{"suggestions":[{"original":"hers","replacement":"here","alternatives":["her's","hers","here"],"category":"correctness","rule":"spelling","explanation":"Likely meant 'here'."}]}`,
 	}}
 	c := New(fake, "m", NewCache(16))
-	sugs, _, err := c.Check(context.Background(), "come over hers tomorrow.", Options{Spelling: true, Grammar: true})
+	sugs, _, err := c.Check(context.Background(), "Come over hers tomorrow.", Options{Spelling: true, Grammar: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,5 +271,48 @@ func TestAlternativesFlowThrough(t *testing.T) {
 	// only "her's" survives.
 	if len(sugs[0].Alternatives) != 1 || sugs[0].Alternatives[0] != "her's" {
 		t.Errorf("alternatives = %v", sugs[0].Alternatives)
+	}
+}
+
+func TestCapitalizationRule(t *testing.T) {
+	fake := &fakeProvider{responses: map[string]string{}}
+	c := New(fake, "m", NewCache(16))
+	text := "this sentence starts lowercase. This one is fine. iPhone sales rose."
+	sugs, _, err := c.Check(context.Background(), text, Options{Grammar: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sugs) != 1 {
+		t.Fatalf("got %d suggestions: %+v", len(sugs), sugs)
+	}
+	s := sugs[0]
+	if s.Rule != "capitalization" || s.Original != "t" || s.Replacement != "T" || s.Span.Start != 0 {
+		t.Errorf("suggestion = %+v", s)
+	}
+	// Muting the rule silences it.
+	sugs2, _, _ := c.Check(context.Background(), text, Options{Grammar: true, DisabledRules: []string{"capitalization"}})
+	if len(sugs2) != 0 {
+		t.Errorf("muted capitalization still flagged: %+v", sugs2)
+	}
+	// Spelling-only pass must not emit it (grammar owns the rule).
+	sugs3, _, _ := c.Check(context.Background(), text, Options{Spelling: true})
+	if len(sugs3) != 0 {
+		t.Errorf("spelling pass emitted capitalization: %+v", sugs3)
+	}
+}
+
+func TestLanguageAffectsPromptAndCacheKey(t *testing.T) {
+	gb := Options{Spelling: true, Language: "en-GB"}
+	us := Options{Spelling: true, Language: "en-US"}
+	if gb.key() == us.key() {
+		t.Fatal("language must be part of the cache key")
+	}
+	msgs := buildMessages("The colour is nice.", gb)
+	if !strings.Contains(msgs[0].Content, "BRITISH") {
+		t.Error("British instruction missing from prompt")
+	}
+	tiers := TiersFor(gb)
+	if len(tiers) == 0 || tiers[0].Opts.Language != "en-GB" {
+		t.Error("language must propagate into tier options")
 	}
 }

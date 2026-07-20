@@ -47,6 +47,13 @@
         <option value="academic">Academic</option>
       </select>
     </label>
+    <label>Language
+      <select id="language">
+        <option value="">Automatic (match the text)</option>
+        <option value="en-GB">British English</option>
+        <option value="en-US">American English</option>
+      </select>
+    </label>
   </section>
 
   <section class="card">
@@ -70,60 +77,25 @@
       <input id="dict-word" type="text" placeholder="Add a word…" spellcheck="false" style="flex:1">
       <button id="dict-add" class="ghost">Add</button>
     </div>
-    <div class="row" style="margin-top:14px">
-      <span class="hint" id="dismissed-count">—</span>
-      <button id="dismissed-clear" class="ghost">Forget dismissals</button>
+    <h2 style="margin-top:16px">Dismissed suggestions</h2>
+    <p class="hint">Fixes you've told Tone to stop offering. Remove one to see it again.</p>
+    <div id="dismissed-list" class="chips"><span class="hint">—</span></div>
+    <div class="row">
+      <span class="hint" id="dismissed-count"></span>
+      <button id="dismissed-clear" class="ghost">Forget all</button>
     </div>
   </section>
 
   <section class="card">
-    <h2>Provider &amp; model</h2>
-    <label>Provider
-      <select id="provider-select">
-        <option value="ollama">Local (Ollama) — private, free</option>
-        <option value="openai">OpenAI</option>
-        <option value="deepseek">DeepSeek</option>
-        <option value="anthropic">Anthropic</option>
-      </select>
-    </label>
+    <h2>Ready-to-use models</h2>
     <div id="local-model-row">
-      <label>Model
+      <label>Active model (downloaded on this machine)
         <select id="model-select"></select>
       </label>
-      <p class="hint">Downloaded models. The wizard has a curated list with tradeoffs.</p>
-      <label>Pull any Ollama model
-        <input id="custom-model" type="text" spellcheck="false"
-               placeholder="any tag from ollama.com/library — e.g. mistral-nemo:12b">
-      </label>
-      <div class="row">
-        <span class="hint" id="custom-model-status"></span>
-        <span>
-          <a id="rerun-setup" href="/setup"><button class="ghost">Setup wizard</button></a>
-          <button id="custom-model-pull">Pull &amp; use</button>
-        </span>
-      </div>
     </div>
-    <div id="cloud-model-row" class="hidden">
-      <label>Model name
-        <input id="cloud-model" type="text" spellcheck="false"
-               placeholder="e.g. gpt-4o-mini · deepseek-chat · claude-haiku-4-5">
-      </label>
-      <label>API key
-        <input id="cloud-key" type="password" autocomplete="off" spellcheck="false"
-               placeholder="paste to store in the OS keychain">
-      </label>
-      <div class="row">
-        <span class="hint" id="key-status"></span>
-        <span>
-          <button id="key-delete" class="ghost">Remove key</button>
-          <button id="key-save" class="ghost">Save key</button>
-          <button id="provider-test">Test</button>
-        </span>
-      </div>
-      <p class="hint" id="provider-test-result"></p>
-      <p class="hint">Keys live in your OS keychain, never in config files. Cloud
-      checks send your text to that provider — use Local for anything sensitive.</p>
-    </div>
+    <p class="hint" id="cloud-active-info" hidden></p>
+    <p class="hint">To switch provider or download more models, use the setup wizard.</p>
+    <a id="rerun-setup" href="/setup"><button class="ghost">Open setup wizard</button></a>
   </section>
 
   <section class="card">

@@ -17,6 +17,9 @@ type Options struct {
 	Tone       bool
 	// ToneTarget: "", "formal", "casual", "confident", "friendly", "academic".
 	ToneTarget string
+	// Language: "" (match the text), "en-GB", or "en-US" — which spelling
+	// conventions count as correct.
+	Language string
 	// StyleRules are user-authored constraints, e.g. "Do not use contractions".
 	StyleRules []string
 	// DisabledRules suppresses suggestions whose rule slug matches
@@ -64,6 +67,8 @@ func (o Options) key() string {
 	sb.WriteByte('|')
 	sb.WriteString(o.ToneTarget)
 	sb.WriteByte('|')
+	sb.WriteString(o.Language)
+	sb.WriteByte('|')
 	sb.WriteString(strings.Join(o.StyleRules, "\x1f"))
 	return sb.String()
 }
@@ -109,6 +114,13 @@ func buildMessages(segText string, opts Options) []provider.Message {
 		if opts.ToneTarget != "" {
 			sb.WriteString(" The writer wants a " + opts.ToneTarget + " tone; flag wording that clearly works against it and suggest a replacement that fits.")
 		}
+	}
+
+	switch opts.Language {
+	case "en-GB":
+		sb.WriteString("\n\nThe writer uses BRITISH English. British spellings (colour, organise, centre, travelled) are correct — never flag them. Flag American spellings (color, organize) as errors with the British form as the replacement.")
+	case "en-US":
+		sb.WriteString("\n\nThe writer uses AMERICAN English. American spellings (color, organize, center, traveled) are correct — never flag them. Flag British spellings (colour, organise) as errors with the American form as the replacement.")
 	}
 
 	if len(opts.StyleRules) > 0 {

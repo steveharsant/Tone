@@ -48,6 +48,43 @@
     </div>
   </section>
 
+  <section class="card">
+    <h2>More options</h2>
+    <label>Pull any Ollama model
+      <input id="wiz-custom-model" type="text" spellcheck="false"
+             placeholder="any tag from ollama.com/library — e.g. mistral-nemo:12b">
+    </label>
+    <div class="row">
+      <span class="hint" id="wiz-custom-status"></span>
+      <button id="wiz-custom-pull" class="ghost">Pull &amp; use</button>
+    </div>
+
+    <label style="margin-top:14px">Or use a cloud provider instead
+      <select id="wiz-provider">
+        <option value="">— keep it local —</option>
+        <option value="openai">OpenAI</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="anthropic">Anthropic</option>
+      </select>
+    </label>
+    <div id="wiz-cloud" class="hidden">
+      <label>Model name
+        <input id="wiz-cloud-model" type="text" spellcheck="false"
+               placeholder="e.g. gpt-4o-mini · deepseek-chat · claude-haiku-4-5">
+      </label>
+      <label>API key
+        <input id="wiz-cloud-key" type="password" autocomplete="off" spellcheck="false"
+               placeholder="stored in your OS keychain, never in files">
+      </label>
+      <div class="row">
+        <span class="hint" id="wiz-cloud-status"></span>
+        <button id="wiz-cloud-save">Save, test &amp; use</button>
+      </div>
+      <p class="hint">Cloud checks send your text to that provider — keep it local
+      for anything sensitive.</p>
+    </div>
+  </section>
+
   <section id="step-done" class="card hidden">
     <h2>3 · Pair the browser extension</h2>
     <p>Setup complete. Paste this pairing token into the Tone extension's options page:</p>

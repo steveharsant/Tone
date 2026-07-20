@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/steveharsant/tone/engine/internal/provider"
 )
@@ -123,8 +125,75 @@ func (c *Checker) Check(ctx context.Context, text string, opts Options) ([]Sugge
 			})
 		}
 	}
+	// Deterministic rule: sentences start with a capital letter. The model's
+	// attention on this is unreliable; the engine checks it itself.
+	if opts.Grammar && !disabled[normalizeRule("capitalization")] {
+		out = append(out, capitalizationSuggestions(text, segs, conv, out)...)
+	}
+
 	sort.Slice(out, func(i, j int) bool { return out[i].Span.Start < out[j].Span.Start })
 	return out, stats, nil
+}
+
+// capitalizationSuggestions flags segments whose first letter is lowercase.
+// Skips mixed-case first words (iPhone, eBay) and spans the model already
+// covers.
+func capitalizationSuggestions(text string, segs []Segment, conv *U16Converter, existing []Suggestion) []Suggestion {
+	var out []Suggestion
+	for _, seg := range segs {
+		// Step over leading quotes/brackets to the first letter.
+		i := 0
+		var first rune
+		var size int
+		for i < len(seg.Text) {
+			r, s := utf8.DecodeRuneInString(seg.Text[i:])
+			if unicode.IsLetter(r) {
+				first, size = r, s
+				break
+			}
+			if !strings.ContainsRune(`"'“‘([`, r) {
+				break // starts with a digit, emoji, etc. — not our business
+			}
+			i += s
+		}
+		if first == 0 || !unicode.IsLower(first) {
+			continue
+		}
+		// Mixed-case first word (iPhone) is intentional.
+		rest := seg.Text[i+size:]
+		wordEnd := strings.IndexFunc(rest, func(r rune) bool { return !isWordRune(r) })
+		if wordEnd == -1 {
+			wordEnd = len(rest)
+		}
+		if strings.IndexFunc(rest[:wordEnd], unicode.IsUpper) != -1 {
+			continue
+		}
+
+		bs := seg.ByteStart + i
+		be := bs + size
+		start, end := conv.ToUTF16(bs), conv.ToUTF16(be)
+		clash := false
+		for _, s := range existing {
+			if start < s.Span.End && end > s.Span.Start {
+				clash = true
+				break
+			}
+		}
+		if clash {
+			continue
+		}
+		out = append(out, Suggestion{
+			ID:          newID(),
+			Span:        Span{Start: start, End: end},
+			Original:    string(first),
+			Replacement: string(unicode.ToUpper(first)),
+			Category:    CategoryCorrectness,
+			Rule:        "capitalization",
+			Explanation: "Sentences start with a capital letter.",
+			Confidence:  1,
+		})
+	}
+	return out
 }
 
 // Tier is one priority pass of a tiered check.
@@ -138,7 +207,7 @@ type Tier struct {
 // Each tier is a lean single-purpose prompt, so time-to-first-suggestion
 // beats one combined pass; per-tier cache keys fall out of Options.key().
 func TiersFor(opts Options) []Tier {
-	base := Options{DisabledRules: opts.DisabledRules}
+	base := Options{DisabledRules: opts.DisabledRules, Language: opts.Language}
 	var tiers []Tier
 	add := func(name string, mod func(*Options)) {
 		o := base

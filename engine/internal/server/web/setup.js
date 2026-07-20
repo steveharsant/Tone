@@ -186,6 +186,96 @@
     }
   };
 
+  /* Custom Ollama model: any tag the user finds — rides the background
+   * pull job, then becomes the active model. */
+  $('wiz-custom-pull').onclick = async () => {
+    const status = $('wiz-custom-status');
+    const tag = $('wiz-custom-model').value.trim();
+    if (!tag) {
+      status.textContent = 'Enter a model tag first.';
+      return;
+    }
+    $('wiz-custom-pull').disabled = true;
+    try {
+      const start = await api('/api/setup/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: tag }),
+      });
+      if (!start.ok && start.status !== 202) throw new Error((await start.json()).error || 'could not start');
+      for (;;) {
+        const st = await (await api('/api/setup/pull/status')).json();
+        if (st.phase === 'error') throw new Error(st.error || 'download failed');
+        if (!st.active && st.phase === 'success') break;
+        status.textContent = st.total > 0
+          ? `Downloading… ${gb(st.completed)} / ${gb(st.total)} (safe to close this page)`
+          : (st.phase || 'starting…');
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      const done = await api('/api/setup/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: tag }),
+      });
+      if (!done.ok) throw new Error('failed to save configuration');
+      status.textContent = `✓ ${tag} downloaded and active.`;
+      $('wiz-custom-model').value = '';
+      refresh();
+    } catch (e) {
+      status.textContent = '✗ ' + (e.message || e);
+    } finally {
+      $('wiz-custom-pull').disabled = false;
+    }
+  };
+
+  /* Cloud provider branch: store key in the keychain, verify with a real
+   * completion, then make it the active provider. */
+  $('wiz-provider').addEventListener('change', () => {
+    $('wiz-cloud').classList.toggle('hidden', !$('wiz-provider').value);
+  });
+  $('wiz-cloud-save').onclick = async () => {
+    const status = $('wiz-cloud-status');
+    const type = $('wiz-provider').value;
+    const model = $('wiz-cloud-model').value.trim();
+    const key = $('wiz-cloud-key').value.trim();
+    if (!type || !model) {
+      status.textContent = 'Pick a provider and enter a model name.';
+      return;
+    }
+    $('wiz-cloud-save').disabled = true;
+    try {
+      if (key) {
+        const kr = await api('/api/settings/key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: type, key }),
+        });
+        if (!kr.ok) throw new Error((await kr.json()).error || 'could not store key');
+        $('wiz-cloud-key').value = '';
+      }
+      status.textContent = 'Testing…';
+      const t = await (await api('/api/settings/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, model }),
+      })).json();
+      if (!t.ok) throw new Error(t.error);
+      const sr = await api('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: { type, model } }),
+      });
+      if (!sr.ok) throw new Error('could not save provider');
+      status.textContent = `✓ ${type} / ${model} is now the active provider.`;
+      $('pairing-token').textContent = token;
+      $('step-done').classList.remove('hidden');
+    } catch (e) {
+      status.textContent = '✗ ' + (e.message || e);
+    } finally {
+      $('wiz-cloud-save').disabled = false;
+    }
+  };
+
   refresh().catch((e) => {
     $('ollama-status').innerHTML =
       '<span class="status-dot dot-err"></span>Cannot reach engine: ' + e.message;

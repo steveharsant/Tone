@@ -54,6 +54,9 @@ type Config struct {
 	// ToneTarget is the desired voice ("", "formal", "casual", "confident",
 	// "friendly", "academic"). Empty means neutral/no target.
 	ToneTarget string `json:"tone_target,omitempty"`
+	// Language selects the spelling convention: "" (match the text),
+	// "en-GB" (British), or "en-US" (American).
+	Language string `json:"language,omitempty"`
 	// StyleRules are user-authored instructions injected into the checker
 	// prompt, e.g. "Do not use contractions".
 	StyleRules []string `json:"style_rules,omitempty"`

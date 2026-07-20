@@ -1,4 +1,6 @@
-/* Tone settings page. */
+/* Tone settings page. Provider switching and model downloads live in the
+ * setup wizard; settings manages checks, language, rules, memory, and which
+ * already-downloaded model is active. */
 (() => {
   const token = location.hash.slice(1) || sessionStorage.getItem('tone-token') || '';
   if (token) sessionStorage.setItem('tone-token', token);
@@ -16,6 +18,10 @@
    * browser, so bookmarking the tokened link stays safe.) */
   const api = (path, opts = {}) =>
     fetch(path, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + token } });
+  const postJSON = (path, body, method = 'POST') =>
+    api(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+  let providerType = 'ollama';
 
   async function loadHealth() {
     try {
@@ -25,13 +31,12 @@
       $('health').innerHTML = `<span class="status-dot ${dot}"></span>${label} · engine v${h.engine_version}`;
       $('health-detail').textContent = h.ollama.running
         ? `Ollama v${h.ollama.version}${h.ollama.supervised ? ' (managed by Tone)' : ''} · model ${h.provider.model || 'none'}`
-        : 'Ollama is not running.';
+        : h.provider.type === 'ollama' ? 'Ollama is not running.' : `${h.provider.type} · ${h.provider.model}`;
     } catch (e) {
       $('health').innerHTML = `<span class="status-dot dot-err"></span>Engine unreachable: ${e.message}`;
     }
   }
 
-  let keyPresence = {};
   async function loadSettings() {
     const s = await (await api('/api/settings')).json();
     $('chk-spelling').checked = s.checks.spelling;
@@ -40,13 +45,18 @@
     $('chk-vocabulary').checked = s.checks.vocabulary;
     $('chk-tone').checked = s.checks.tone;
     $('tone-target').value = s.tone_target || '';
+    $('language').value = s.language || '';
     $('style-rules').value = (s.style_rules || []).join('\n');
     $('disabled-rules').value = (s.disabled_rules || []).join('\n');
-    keyPresence = s.keys || {};
-    $('provider-select').value = s.provider.type || 'ollama';
-    if (s.provider.type !== 'ollama') $('cloud-model').value = s.provider.model || '';
-    updateProviderUI();
+    providerType = s.provider.type || 'ollama';
 
+    if (providerType !== 'ollama') {
+      $('local-model-row').classList.add('hidden');
+      const info = $('cloud-active-info');
+      info.hidden = false;
+      info.textContent = `Active provider: ${providerType} · ${s.provider.model}. Text is sent to that provider for checking.`;
+      return;
+    }
     const status = await (await api('/api/setup/status')).json();
     const sel = $('model-select');
     sel.innerHTML = '';
@@ -61,120 +71,87 @@
     }
   }
 
-  function updateProviderUI() {
-    const p = $('provider-select').value;
-    const local = p === 'ollama';
-    $('local-model-row').classList.toggle('hidden', !local);
-    $('cloud-model-row').classList.toggle('hidden', local);
-    if (!local) {
-      $('key-status').textContent = keyPresence[p]
-        ? 'API key stored in keychain ✓'
-        : 'No API key stored for this provider.';
+  async function loadDictionary() {
+    const d = await (await api('/v1/dictionary')).json();
+    const list = $('dict-list');
+    list.innerHTML = '';
+    for (const word of d.words || []) {
+      list.append(chip(word, async () => {
+        await postJSON('/v1/dictionary', { word }, 'DELETE');
+        loadDictionary();
+      }));
     }
+    if (!(d.words || []).length) list.innerHTML = '<span class="hint">No dictionary words yet.</span>';
+
+    const dl = $('dismissed-list');
+    dl.innerHTML = '';
+    const dismissals = d.dismissals || [];
+    for (const dis of dismissals) {
+      const label = `${dis.original}  (${dis.category}${dis.expires ? ' · snoozed' : ''})`;
+      dl.append(chip(label, async () => {
+        await postJSON('/v1/dismissals', { category: dis.category, original: dis.original }, 'DELETE');
+        loadDictionary();
+      }, dis.expires ? `Snoozed until ${new Date(dis.expires).toLocaleString()}` : 'Dismissed forever — click × to see it again'));
+    }
+    if (!dismissals.length) dl.innerHTML = '<span class="hint">Nothing dismissed.</span>';
+    $('dismissed-count').textContent = dismissals.length ? `${dismissals.length} remembered` : '';
   }
-  $('provider-select').addEventListener('change', updateProviderUI);
 
-  $('key-save').onclick = async () => {
-    const providerName = $('provider-select').value;
-    const key = $('cloud-key').value.trim();
-    if (!key) return;
-    const r = await api('/api/settings/key', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: providerName, key }),
-    });
-    $('cloud-key').value = '';
-    keyPresence[providerName] = r.ok;
-    $('key-status').textContent = r.ok ? 'API key stored in keychain ✓' : 'Failed to store key.';
+  function chip(text, onRemove, title) {
+    const c = document.createElement('span');
+    c.className = 'chip';
+    if (title) c.title = title;
+    c.append(text);
+    const x = document.createElement('button');
+    x.textContent = '×';
+    x.title = 'Remove';
+    x.onclick = onRemove;
+    c.append(x);
+    return c;
+  }
+
+  $('dict-add').onclick = async () => {
+    const word = $('dict-word').value.trim();
+    if (!word) return;
+    await postJSON('/v1/dictionary', { word });
+    $('dict-word').value = '';
+    loadDictionary();
   };
-  /* Custom Ollama models: any tag the user finds. Rides the background
-   * pull job, so navigating away never cancels the download. */
-  $('custom-model-pull').onclick = async () => {
-    const status = $('custom-model-status');
-    const tag = $('custom-model').value.trim();
-    if (!tag) {
-      status.textContent = 'Enter a model tag first.';
-      return;
-    }
-    $('custom-model-pull').disabled = true;
-    try {
-      const start = await api('/api/setup/pull', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: tag }),
-      });
-      if (!start.ok && start.status !== 202) throw new Error((await start.json()).error || 'could not start');
-      for (;;) {
-        const st = await (await api('/api/setup/pull/status')).json();
-        if (st.phase === 'error') throw new Error(st.error || 'download failed');
-        if (!st.active && st.phase === 'success') break;
-        status.textContent = st.total > 0
-          ? `Downloading… ${(st.completed / 1e9).toFixed(1)} / ${(st.total / 1e9).toFixed(1)} GB (safe to leave this page)`
-          : (st.phase || 'starting…');
-        await new Promise((r) => setTimeout(r, 700));
-      }
-      await api('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: { type: 'ollama', model: tag } }),
-      });
-      status.textContent = `✓ ${tag} downloaded and active.`;
-      $('custom-model').value = '';
-      loadSettings();
-      loadHealth();
-    } catch (e) {
-      status.textContent = '✗ ' + (e.message || e);
-    } finally {
-      $('custom-model-pull').disabled = false;
-    }
-  };
-  $('custom-model').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') $('custom-model-pull').click();
+  $('dict-word').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('dict-add').click();
   });
-
-  $('provider-test').onclick = async () => {
-    const result = $('provider-test-result');
-    const type = $('provider-select').value;
-    const model = type === 'ollama' ? $('model-select').value : $('cloud-model').value.trim();
-    if (!model) {
-      result.textContent = 'Enter a model name first.';
-      return;
-    }
-    result.textContent = 'Testing…';
-    try {
-      const r = await (await api('/api/settings/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, model }),
-      })).json();
-      if (r.ok) {
-        // A working provider is what the user wants active — apply it so a
-        // successful Test can't silently leave the old provider in charge.
-        await api('/api/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: { type, model } }),
-        });
-        result.textContent = `✓ ${type} / ${model} responded — now the active provider.`;
-        loadHealth();
-      } else {
-        result.textContent = `✗ ${r.error}`;
-      }
-    } catch (e) {
-      result.textContent = '✗ ' + e.message;
-    }
+  $('dismissed-clear').onclick = async () => {
+    await api('/v1/dismissals', { method: 'DELETE' });
+    loadDictionary();
   };
 
-  $('key-delete').onclick = async () => {
-    const providerName = $('provider-select').value;
-    await api('/api/settings/key', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider: providerName }),
-    });
-    keyPresence[providerName] = false;
-    updateProviderUI();
+  $('save').onclick = async () => {
+    const lines = (v) => v.split('\n').map((l) => l.trim()).filter(Boolean);
+    const body = {
+      checks: {
+        spelling: $('chk-spelling').checked,
+        grammar: $('chk-grammar').checked,
+        clarity: $('chk-clarity').checked,
+        vocabulary: $('chk-vocabulary').checked,
+        tone: $('chk-tone').checked,
+      },
+      tone_target: $('tone-target').value,
+      language: $('language').value,
+      style_rules: lines($('style-rules').value),
+      disabled_rules: lines($('disabled-rules').value),
+    };
+    if (providerType === 'ollama' && $('model-select').value) {
+      body.model = $('model-select').value;
+    }
+    const r = await postJSON('/api/settings', body);
+    $('save-status').textContent = r.ok ? 'Saved — takes effect on the next check.' : 'Save failed.';
+    setTimeout(() => ($('save-status').textContent = ''), 4000);
+    loadHealth();
   };
+
+  loadHealth();
+  loadSettings().catch((e) => ($('save-status').textContent = 'Load failed: ' + e.message));
+  loadDictionary().catch(() => {});
 
   async function loadPairing() {
     try {
@@ -200,11 +177,7 @@
           if (!approve) b.className = 'ghost';
           b.style.marginLeft = '8px';
           b.onclick = async () => {
-            await api('/api/pair/decide', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: req.id, approve }),
-            });
+            await postJSON('/api/pair/decide', { id: req.id, approve });
             loadPairing();
           };
           btns.appendChild(b);
@@ -216,83 +189,6 @@
       /* engine restarting; retry next poll */
     }
   }
-
-  async function loadDictionary() {
-    const d = await (await api('/v1/dictionary')).json();
-    const list = $('dict-list');
-    list.innerHTML = '';
-    for (const word of d.words || []) {
-      const chip = document.createElement('span');
-      chip.className = 'chip';
-      chip.append(word);
-      const x = document.createElement('button');
-      x.textContent = '×';
-      x.title = 'Remove';
-      x.onclick = async () => {
-        await api('/v1/dictionary', {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ word }),
-        });
-        loadDictionary();
-      };
-      chip.append(x);
-      list.append(chip);
-    }
-    $('dismissed-count').textContent = `${d.dismissed || 0} dismissed suggestion${d.dismissed === 1 ? '' : 's'} remembered`;
-  }
-
-  $('dict-add').onclick = async () => {
-    const word = $('dict-word').value.trim();
-    if (!word) return;
-    await api('/v1/dictionary', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ word }),
-    });
-    $('dict-word').value = '';
-    loadDictionary();
-  };
-  $('dict-word').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') $('dict-add').click();
-  });
-  $('dismissed-clear').onclick = async () => {
-    await api('/v1/dismissals', { method: 'DELETE' });
-    loadDictionary();
-  };
-
-  $('save').onclick = async () => {
-    const lines = (v) => v.split('\n').map((l) => l.trim()).filter(Boolean);
-    const providerType = $('provider-select').value;
-    const body = {
-      checks: {
-        spelling: $('chk-spelling').checked,
-        grammar: $('chk-grammar').checked,
-        clarity: $('chk-clarity').checked,
-        vocabulary: $('chk-vocabulary').checked,
-        tone: $('chk-tone').checked,
-      },
-      tone_target: $('tone-target').value,
-      style_rules: lines($('style-rules').value),
-      disabled_rules: lines($('disabled-rules').value),
-      provider: {
-        type: providerType,
-        model: providerType === 'ollama' ? $('model-select').value : $('cloud-model').value.trim(),
-      },
-    };
-    const r = await api('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    $('save-status').textContent = r.ok ? 'Saved — takes effect on the next check.' : 'Save failed.';
-    setTimeout(() => ($('save-status').textContent = ''), 4000);
-    loadHealth();
-  };
-
-  loadHealth();
-  loadSettings().catch((e) => ($('save-status').textContent = 'Load failed: ' + e.message));
-  loadDictionary().catch(() => {});
   loadPairing();
   setInterval(loadPairing, 3000);
 })();

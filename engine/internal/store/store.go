@@ -177,6 +177,36 @@ func (s *Store) DismissedCount() int {
 	return len(s.d.Dismissed)
 }
 
+// Dismissals returns the current (non-expired) dismissals for display.
+func (s *Store) Dismissals() []Dismissal {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Dismissal, 0, len(s.d.Dismissed))
+	for _, d := range s.d.Dismissed {
+		if !d.expired(now) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// RemoveDismissal forgets a single dismissed suggestion.
+func (s *Store) RemoveDismissal(category, original string) error {
+	category = strings.TrimSpace(strings.ToLower(category))
+	original = strings.TrimSpace(original)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.d.Dismissed[:0]
+	for _, d := range s.d.Dismissed {
+		if !(d.Category == category && d.Original == original) {
+			kept = append(kept, d)
+		}
+	}
+	s.d.Dismissed = kept
+	return s.saveLocked()
+}
+
 func (s *Store) ClearDismissals() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
