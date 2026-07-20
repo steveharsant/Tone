@@ -235,7 +235,15 @@ export class FieldSession {
       .filter((s) => !this.dismissed.has(keyOf(s)))
       .map((s) => ({ ...s, tier }));
 
+    // Overlap precedence: within the correctness family (spelling+grammar
+    // tiers), the LONGER span wins — it's the complete fix ("sum thing"→
+    // "something" beats "sum"→"some"). Across categories, tier priority
+    // wins so a clarity rewrite can't shadow a spelling fix.
     const candidates = [...kept, ...fresh].sort((a, b) => {
+      if (a.category === 'correctness' && b.category === 'correctness') {
+        const len = (b.span.end - b.span.start) - (a.span.end - a.span.start);
+        if (len !== 0) return len;
+      }
       const p = tierPriority(a.tier) - tierPriority(b.tier);
       return p !== 0 ? p : a.span.start - b.span.start;
     });

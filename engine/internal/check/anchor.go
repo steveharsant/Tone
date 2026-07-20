@@ -1,6 +1,7 @@
 package check
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -23,6 +24,16 @@ type anchored struct {
 // is dropped. Precision over recall: a wrong underline is worse than a
 // missing one.
 func anchorAll(segText string, raws []RawSuggestion) []anchored {
+	// Longer originals anchor first: when the model emits both a fragment
+	// fix ("sum"→"some") and the complete fix ("sum thing"→"something"),
+	// the complete one must claim the span — emission order is arbitrary.
+	ordered := make([]RawSuggestion, len(raws))
+	copy(ordered, raws)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return len(ordered[i].Original) > len(ordered[j].Original)
+	})
+	raws = ordered
+
 	var out []anchored
 	var claimed [][2]int
 
@@ -58,10 +69,99 @@ func anchorAll(segText string, raws []RawSuggestion) []anchored {
 		if segText[s:e] == raw.Replacement {
 			continue
 		}
+		s, e = expandMergedWords(segText, raw, s, e, overlaps)
 		claimed = append(claimed, [2]int{s, e})
 		out = append(out, anchored{raw: raw, byteStart: s, byteEnd: e})
 	}
 	return out
+}
+
+// expandMergedWords repairs a sloppy merged-word span from the model:
+// original "sum" with replacement "something" while the document continues
+// "sum thing" means the model intended to merge both words — applying it
+// verbatim would yield "something thing". If the replacement ends with the
+// next document word (or begins with the previous one) AND a meaningful
+// remainder is left over, the span grows to cover that word. The remainder
+// requirement keeps duplicate-word fixes ("teh the"→"the") from expanding.
+func expandMergedWords(segText string, raw RawSuggestion, s, e int, overlaps func(s, e int) bool) (int, int) {
+	repl := strings.ToLower(raw.Replacement)
+
+	// Forward: replacement swallows the following word.
+	if e < len(segText) && segText[e] == ' ' {
+		rest := segText[e+1:]
+		wEnd := strings.IndexFunc(rest, func(r rune) bool { return !isWordRune(r) })
+		if wEnd == -1 {
+			wEnd = len(rest)
+		}
+		if matched := swallowLen(repl, strings.ToLower(rest[:wEnd]), false); matched > 0 {
+			if remainder := strings.TrimSpace(repl[:len(repl)-matched]); len(remainder) >= 2 {
+				if ne := e + 1 + wEnd; !overlaps(s, ne) {
+					e = ne
+				}
+			}
+		}
+	}
+	// Backward: replacement swallows the preceding word.
+	if s > 0 && segText[s-1] == ' ' {
+		head := segText[:s-1]
+		wStart := strings.LastIndexFunc(head, func(r rune) bool { return !isWordRune(r) }) + 1
+		if matched := swallowLen(repl, strings.ToLower(head[wStart:]), true); matched > 0 {
+			if remainder := strings.TrimSpace(repl[matched:]); len(remainder) >= 2 {
+				if ns := wStart; !overlaps(ns, e) {
+					s = ns
+				}
+			}
+		}
+	}
+	return s, e
+}
+
+// swallowLen reports how many bytes at the edge of repl correspond to the
+// neighbor word w, tolerating small misspellings — the swallowed neighbor is
+// often the typo'd half ("sum" vs the "some" inside "something"). Returns
+// the matched length in repl, or 0 for no match.
+func swallowLen(repl, w string, prefix bool) int {
+	if w == "" {
+		return 0
+	}
+	for _, l := range []int{len(w), len(w) + 1, len(w) - 1} {
+		if l < 1 || l >= len(repl) { // l == len(repl) would leave no remainder
+			continue
+		}
+		cand := repl[len(repl)-l:]
+		if prefix {
+			cand = repl[:l]
+		}
+		if cand == w {
+			return l
+		}
+		// Fuzzy only for words long enough to make a typo distinguishable.
+		if len(w) >= 3 && editDistance(cand, w) <= 1 {
+			return l
+		}
+	}
+	return 0
+}
+
+// editDistance is a plain Levenshtein for short words (neighbor-word sized).
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(min(cur[j-1]+1, prev[j]+1), prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
 }
 
 // findUnclaimed returns the first exact occurrence of needle in hay that

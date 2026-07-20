@@ -129,3 +129,62 @@ func TestAnchorPrefersBoundaryOccurrence(t *testing.T) {
 		t.Fatalf("anchored wrong occurrence at %d", s.byteStart)
 	}
 }
+
+func TestAnchorPrefersCompleteFixOverFragment(t *testing.T) {
+	seg := "I have sum thing to tell you."
+	// Model emits the fragment fix FIRST — the complete fix must still win.
+	got := anchorAll(seg, []RawSuggestion{
+		{Original: "sum", Replacement: "some", Category: "correctness"},
+		{Original: "sum thing", Replacement: "something", Category: "correctness"},
+	})
+	if len(got) != 1 {
+		t.Fatalf("got %d anchors, want 1", len(got))
+	}
+	if got[0].raw.Replacement != "something" {
+		t.Errorf("fragment fix won over complete fix: %+v", got[0].raw)
+	}
+	if seg[got[0].byteStart:got[0].byteEnd] != "sum thing" {
+		t.Errorf("anchored %q", seg[got[0].byteStart:got[0].byteEnd])
+	}
+}
+
+func TestExpandMergedWordForward(t *testing.T) {
+	seg := "I have sum thing to say."
+	got := anchorAll(seg, []RawSuggestion{
+		{Original: "sum", Replacement: "something", Category: "correctness"},
+	})
+	if len(got) != 1 {
+		t.Fatalf("got %d anchors", len(got))
+	}
+	if covered := seg[got[0].byteStart:got[0].byteEnd]; covered != "sum thing" {
+		t.Errorf("span covers %q, want expansion to 'sum thing'", covered)
+	}
+}
+
+func TestExpandMergedWordBackward(t *testing.T) {
+	seg := "I have sum thing to say."
+	got := anchorAll(seg, []RawSuggestion{
+		{Original: "thing", Replacement: "something", Category: "correctness"},
+	})
+	if len(got) != 1 {
+		t.Fatalf("got %d anchors", len(got))
+	}
+	if covered := seg[got[0].byteStart:got[0].byteEnd]; covered != "sum thing" {
+		t.Errorf("span covers %q, want backward expansion to 'sum thing'", covered)
+	}
+}
+
+func TestNoExpansionForDuplicateWordFix(t *testing.T) {
+	seg := "I saw teh the report."
+	got := anchorAll(seg, []RawSuggestion{
+		{Original: "teh", Replacement: "the", Category: "correctness"},
+	})
+	if len(got) != 1 {
+		t.Fatalf("got %d anchors", len(got))
+	}
+	// Replacement "the" equals the next word entirely — no remainder, so the
+	// span must NOT grow ("teh"→"the" stays a plain typo fix).
+	if covered := seg[got[0].byteStart:got[0].byteEnd]; covered != "teh" {
+		t.Errorf("span covers %q, want plain 'teh'", covered)
+	}
+}

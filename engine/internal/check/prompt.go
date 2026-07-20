@@ -47,7 +47,7 @@ func (o Options) AllowedCategories() map[string]bool {
 // promptVersion MUST be bumped whenever any prompt template above changes:
 // cached results are keyed on options + segment text only, so without a
 // version, stale results from the old prompts would be served forever.
-const promptVersion = "pv4"
+const promptVersion = "pv5"
 
 // key serializes the prompt-affecting state for cache keying.
 func (o Options) key() string {
@@ -75,7 +75,7 @@ Respond with ONLY a JSON object, no prose, in exactly this shape:
 
 Hard rules:
 - "original" MUST be copied character-for-character from the input text (same case, same punctuation, same spacing). Never paraphrase it.
-- Keep "original" as short as possible while still unambiguous — a word or short phrase, not the whole sentence, unless the whole sentence must change.
+- Keep "original" as short as possible while covering the COMPLETE fix. When adjacent words are part of one error, correct them together in a single suggestion: "sum thing" → "something" as ONE suggestion, never "sum" → "some" followed by a leftover. Never split one fix into pieces, and never cover a whole sentence unless the whole sentence must change.
 - "replacement" is the corrected text that should replace "original" verbatim. It must consist of real, correctly spelled words — never invent words.
 - Choose the replacement the writer most likely INTENDED given the whole sentence, not the closest-looking edit: a typo like "hers" in "come over hers" means "here", not "her's".
 - "alternatives" (optional, up to 2) lists other plausible corrections when the intent is ambiguous. Omit or leave empty when there is only one sensible fix.
