@@ -47,7 +47,7 @@ func (o Options) AllowedCategories() map[string]bool {
 // promptVersion MUST be bumped whenever any prompt template above changes:
 // cached results are keyed on options + segment text only, so without a
 // version, stale results from the old prompts would be served forever.
-const promptVersion = "pv3"
+const promptVersion = "pv4"
 
 // key serializes the prompt-affecting state for cache keying.
 func (o Options) key() string {
@@ -71,12 +71,14 @@ func (o Options) key() string {
 const systemPreamble = `You are a precise copy editor inside a writing assistant. You receive one passage of text. Find problems and return them as JSON.
 
 Respond with ONLY a JSON object, no prose, in exactly this shape:
-{"suggestions":[{"original":"...","replacement":"...","category":"...","rule":"...","explanation":"..."}]}
+{"suggestions":[{"original":"...","replacement":"...","alternatives":["..."],"category":"...","rule":"...","explanation":"..."}]}
 
 Hard rules:
 - "original" MUST be copied character-for-character from the input text (same case, same punctuation, same spacing). Never paraphrase it.
 - Keep "original" as short as possible while still unambiguous — a word or short phrase, not the whole sentence, unless the whole sentence must change.
-- "replacement" is the corrected text that should replace "original" verbatim.
+- "replacement" is the corrected text that should replace "original" verbatim. It must consist of real, correctly spelled words — never invent words.
+- Choose the replacement the writer most likely INTENDED given the whole sentence, not the closest-looking edit: a typo like "hers" in "come over hers" means "here", not "her's".
+- "alternatives" (optional, up to 2) lists other plausible corrections when the intent is ambiguous. Omit or leave empty when there is only one sensible fix.
 - Never return a suggestion where "replacement" equals "original".
 - Suggestions must not overlap each other.
 - "rule" is a 1-3 word kebab-case label (e.g. "spelling", "subject-verb-agreement", "wordiness").

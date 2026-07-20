@@ -113,12 +113,13 @@ func (c *Checker) Check(ctx context.Context, text string, opts Options) ([]Sugge
 				ID:   newID(),
 				Span: Span{Start: conv.ToUTF16(bs), End: conv.ToUTF16(be)},
 				// Ground truth is the document, not the model's echo.
-				Original:    text[bs:be],
-				Replacement: a.raw.Replacement,
-				Category:    cat,
-				Rule:        a.raw.Rule,
-				Explanation: a.raw.Explanation,
-				Confidence:  defaultConfidence(cat),
+				Original:     text[bs:be],
+				Replacement:  a.raw.Replacement,
+				Alternatives: cleanAlternatives(a.raw, text[bs:be]),
+				Category:     cat,
+				Rule:         a.raw.Rule,
+				Explanation:  a.raw.Explanation,
+				Confidence:   defaultConfidence(cat),
 			})
 		}
 	}
@@ -211,6 +212,32 @@ func (c *Checker) CheckTiered(ctx context.Context, text string, opts Options, em
 	}
 	wg.Wait()
 	return firstErr
+}
+
+// cleanAlternatives dedupes the model's alternative corrections against the
+// primary replacement and the original text, capping at 2.
+func cleanAlternatives(raw RawSuggestion, original string) []string {
+	var out []string
+	for _, alt := range raw.Alternatives {
+		alt = strings.TrimSpace(alt)
+		if alt == "" || alt == raw.Replacement || alt == original {
+			continue
+		}
+		dup := false
+		for _, existing := range out {
+			if existing == alt {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, alt)
+		}
+		if len(out) == 2 {
+			break
+		}
+	}
+	return out
 }
 
 // normalizeRule folds case and dash/space variants so "Subject Verb

@@ -87,6 +87,51 @@
     keyPresence[providerName] = r.ok;
     $('key-status').textContent = r.ok ? 'API key stored in keychain ✓' : 'Failed to store key.';
   };
+  /* Custom Ollama models: any tag the user finds. Rides the background
+   * pull job, so navigating away never cancels the download. */
+  $('custom-model-pull').onclick = async () => {
+    const status = $('custom-model-status');
+    const tag = $('custom-model').value.trim();
+    if (!tag) {
+      status.textContent = 'Enter a model tag first.';
+      return;
+    }
+    $('custom-model-pull').disabled = true;
+    try {
+      const start = await api('/api/setup/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: tag }),
+      });
+      if (!start.ok && start.status !== 202) throw new Error((await start.json()).error || 'could not start');
+      for (;;) {
+        const st = await (await api('/api/setup/pull/status')).json();
+        if (st.phase === 'error') throw new Error(st.error || 'download failed');
+        if (!st.active && st.phase === 'success') break;
+        status.textContent = st.total > 0
+          ? `Downloading… ${(st.completed / 1e9).toFixed(1)} / ${(st.total / 1e9).toFixed(1)} GB (safe to leave this page)`
+          : (st.phase || 'starting…');
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      await api('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: { type: 'ollama', model: tag } }),
+      });
+      status.textContent = `✓ ${tag} downloaded and active.`;
+      $('custom-model').value = '';
+      loadSettings();
+      loadHealth();
+    } catch (e) {
+      status.textContent = '✗ ' + (e.message || e);
+    } finally {
+      $('custom-model-pull').disabled = false;
+    }
+  };
+  $('custom-model').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('custom-model-pull').click();
+  });
+
   $('provider-test').onclick = async () => {
     const result = $('provider-test-result');
     const type = $('provider-select').value;

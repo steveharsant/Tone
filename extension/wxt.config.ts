@@ -15,7 +15,11 @@ export default defineConfig({
     ...(manifestVersion === 3
       ? { optional_host_permissions: ['http://*/*', 'https://*/*'] }
       : { optional_permissions: ['http://*/*', 'https://*/*'] }),
-    action: { default_title: 'Tone' },
+    icons: { 16: 'icon/16.png', 32: 'icon/32.png', 48: 'icon/48.png', 96: 'icon/96.png', 128: 'icon/128.png' },
+    action: {
+      default_title: 'Tone',
+      default_icon: { 16: 'icon/16.png', 32: 'icon/32.png', 48: 'icon/48.png' },
+    },
     browser_specific_settings: {
       gecko: { id: 'tone@harsant.dev', strict_min_version: '140.0' },
     },

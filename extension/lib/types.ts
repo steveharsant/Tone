@@ -13,6 +13,8 @@ export interface Suggestion {
   span: Span;
   original: string;
   replacement: string;
+  /** Other plausible corrections when the intended word is ambiguous. */
+  alternatives?: string[];
   category: Category;
   rule?: string;
   explanation: string;

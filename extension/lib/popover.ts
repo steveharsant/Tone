@@ -36,6 +36,14 @@ const STYLE = `
 .repl .from { text-decoration: line-through; opacity: .6; }
 .repl .arrow { margin: 0 6px; opacity: .5; }
 .repl .to { font-weight: 600; }
+.alts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 8px; }
+.alts .or { font-size: 11.5px; opacity: .5; }
+.alts button {
+  font: inherit; font-size: 12.5px; color: inherit; cursor: pointer;
+  background: none; border: 1px solid rgba(128,128,128,.45); border-radius: 6px;
+  padding: 2px 9px;
+}
+.alts button:hover { border-color: var(--cat, #4f6df5); color: var(--cat, #4f6df5); }
 .expl { opacity: .85; margin-bottom: 10px; }
 .row { display: flex; gap: 8px; align-items: center; }
 button { font: inherit; border-radius: 7px; padding: 5px 14px; cursor: pointer; border: 0; }
@@ -106,6 +114,26 @@ export class Popover {
     to.textContent = clip(s.replacement, 80);
     repl.append(from, arrow, to);
 
+    // Alternative corrections: the intended word is often not the closest
+    // edit — clicking an alternative accepts with that text instead.
+    let alts: HTMLElement | null = null;
+    if (s.alternatives?.length) {
+      alts = el('div', 'alts');
+      const or = el('span', 'or');
+      or.textContent = 'or:';
+      alts.append(or);
+      for (const alt of s.alternatives) {
+        const b = el('button', 'alt') as HTMLButtonElement;
+        b.textContent = alt;
+        b.title = `Replace with “${alt}” instead`;
+        b.onclick = () => {
+          this.actions.onAccept({ ...s, replacement: alt });
+          this.hide();
+        };
+        alts.append(b);
+      }
+    }
+
     const expl = el('div', 'expl');
     expl.textContent = s.explanation;
 
@@ -157,7 +185,9 @@ export class Popover {
       more.append(addWord);
     }
 
-    this.pop.append(cat, repl, expl, row);
+    this.pop.append(cat, repl);
+    if (alts) this.pop.append(alts);
+    this.pop.append(expl, row);
     if (more.childElementCount > 0) this.pop.append(more);
     const keys = el('div', 'keys');
     keys.textContent = 'Alt+↓/↑ review · Alt+↵ accept · Alt+X dismiss';

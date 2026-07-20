@@ -254,3 +254,22 @@ func TestParseRewriteOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestAlternativesFlowThrough(t *testing.T) {
+	fake := &fakeProvider{responses: map[string]string{
+		"hers": `{"suggestions":[{"original":"hers","replacement":"here","alternatives":["her's","hers","here"],"category":"correctness","rule":"spelling","explanation":"Likely meant 'here'."}]}`,
+	}}
+	c := New(fake, "m", NewCache(16))
+	sugs, _, err := c.Check(context.Background(), "come over hers tomorrow.", Options{Spelling: true, Grammar: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sugs) != 1 {
+		t.Fatalf("got %d suggestions", len(sugs))
+	}
+	// "here" duplicates the replacement, "hers" duplicates the original —
+	// only "her's" survives.
+	if len(sugs[0].Alternatives) != 1 || sugs[0].Alternatives[0] != "her's" {
+		t.Errorf("alternatives = %v", sugs[0].Alternatives)
+	}
+}

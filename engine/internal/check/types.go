@@ -33,19 +33,23 @@ type Suggestion struct {
 	Span        Span    `json:"span"`
 	Original    string  `json:"original"`
 	Replacement string  `json:"replacement"`
-	Category    string  `json:"category"`
-	Rule        string  `json:"rule,omitempty"`
-	Explanation string  `json:"explanation"`
-	Confidence  float64 `json:"confidence"`
+	// Alternatives are other plausible corrections — the intended word is
+	// often not the closest edit ("hers" may mean "here", not "her's").
+	Alternatives []string `json:"alternatives,omitempty"`
+	Category     string   `json:"category"`
+	Rule         string   `json:"rule,omitempty"`
+	Explanation  string   `json:"explanation"`
+	Confidence   float64  `json:"confidence"`
 }
 
 // RawSuggestion is what the model returns for one segment, before anchoring.
 type RawSuggestion struct {
-	Original    string `json:"original"`
-	Replacement string `json:"replacement"`
-	Category    string `json:"category"`
-	Rule        string `json:"rule"`
-	Explanation string `json:"explanation"`
+	Original     string   `json:"original"`
+	Replacement  string   `json:"replacement"`
+	Alternatives []string `json:"alternatives"`
+	Category     string   `json:"category"`
+	Rule         string   `json:"rule"`
+	Explanation  string   `json:"explanation"`
 }
 
 func newID() string {

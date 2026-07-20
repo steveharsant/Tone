@@ -90,8 +90,18 @@
       <label>Model
         <select id="model-select"></select>
       </label>
-      <p class="hint">Only downloaded models are listed — use the wizard to add more.</p>
-      <a id="rerun-setup" href="/setup"><button class="ghost">Open setup wizard</button></a>
+      <p class="hint">Downloaded models. The wizard has a curated list with tradeoffs.</p>
+      <label>Pull any Ollama model
+        <input id="custom-model" type="text" spellcheck="false"
+               placeholder="any tag from ollama.com/library — e.g. mistral-nemo:12b">
+      </label>
+      <div class="row">
+        <span class="hint" id="custom-model-status"></span>
+        <span>
+          <a id="rerun-setup" href="/setup"><button class="ghost">Setup wizard</button></a>
+          <button id="custom-model-pull">Pull &amp; use</button>
+        </span>
+      </div>
     </div>
     <div id="cloud-model-row" class="hidden">
       <label>Model name
